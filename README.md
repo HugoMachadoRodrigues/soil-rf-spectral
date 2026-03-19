@@ -59,7 +59,7 @@ soil-rf-spectral/
 │   └── utils_visualization.R    # ggplot2 figures
 ├── data/                        # OSSL files (auto-downloaded; gitignored)
 ├── output/
-│   ├── models/                  # Serialised ranger objects (.qs)
+│   ├── models/                  # Serialised ranger objects (.rds)
 │   ├── metrics/                 # CSV performance tables
 │   └── figures/                 # Plots (PNG / PDF)
 └── README.md
@@ -105,21 +105,21 @@ OSSL VisNIR / ASD (350–2500 nm)
 
 ## Spectral Preprocessing
 
-SG smoothing is applied to raw reflectance first and serves as the common base for all three treatments. The other two treatments are derived from the smoothed spectra, not from raw reflectance. This shared-base design (Rinnan et al. 2009) ensures that differences in model performance are attributable to the transformation step alone, not to differences in the underlying smoothing.
+Raw VisNIR reflectance spectra (350–2500 nm, ASD FieldSpec 4) were first subjected to wavelength range trimming (400–2450 nm) to remove edge-of-range noise, then processed through three candidate preprocessing treatments. All three treatments share a common Savitzky–Golay (SG) smoothed base, following the shared-base design of Rinnan et al. (2009): SG smoothing is applied once to raw reflectance, and the two additional treatments are derived from that smoothed output rather than from raw reflectance. This design ensures that observed differences in model performance are attributable to the transformation step alone, not to differences in the underlying noise reduction.
 
-| Treatment | Input | Transform | Removes / Linearises | Key reference |
+| Treatment | Input | Transform | Physical justification | Key reference |
 |---|---|---|---|---|
-| `sg_smooth` | Raw reflectance | SG smooth (m = 0) | High-frequency instrument noise | Savitzky & Golay (1964) |
-| `sg_deriv1` | SG smooth | SG 1st derivative (m = 1) | Additive baseline offsets and slope effects | Rinnan et al. (2009) |
-| `snv` | SG smooth | Standard Normal Variate | Multiplicative scatter and path-length variation | Barnes et al. (1989) |
+| `sg_smooth` | Raw reflectance | SG polynomial smooth (m = 0, w = 11, p = 3) | Reduces high-frequency instrument noise while preserving spectral band shape | Savitzky & Golay (1964) |
+| `sg_deriv1` | SG smooth | SG 1st derivative (m = 1) | Removes additive baseline offsets and multiplicative slope effects arising from variable path length and particle size | Rinnan et al. (2009) |
+| `snv` | SG smooth | Standard Normal Variate: xSNV = (x − μ) / σ per spectrum | Corrects multiplicative scatter and path-length variation without requiring a reference spectrum; preferred over MSC for heterogeneous sample sets | Barnes et al. (1989) |
 
-SG parameters (`SG_WINDOW`, `SG_POLY`) apply uniformly across all treatments and are reported in model outputs. All preprocessing is applied identically within each cross-validation resample to prevent data leakage. Viscarra Rossel & Behrens (2010) demonstrated that SG derivatives and SNV consistently improve RF performance for soil VisNIR spectra relative to raw reflectance.
+SG window size and polynomial order (`SG_WINDOW`, `SG_POLY`) are reported in all model outputs for reproducibility. All preprocessing transformations are computed exclusively within each cross-validation training partition and applied to the corresponding held-out fold, ensuring no information from validation samples influences the preprocessing step. Viscarra Rossel & Behrens (2010) demonstrated that SG derivatives and SNV consistently improve RF predictive performance for soil VisNIR spectra relative to raw reflectance across a wide range of soil properties.
 
 ---
 
 ## Performance Metrics
 
-All metrics are computed on the **original measurement scale** after back-transformation (when `USE_LOG_TARGET = TRUE`). For repeated CV, values are reported as **mean ± SD across all 30 resamples** (10 folds × 3 repeats).
+All metrics are computed on the **original measurement scale** after back-transformation (when `LOG_MODES = "log"`). For repeated CV, values are reported as **mean ± SD across all 30 resamples** (10 folds × 3 repeats).
 
 ---
 
@@ -253,7 +253,7 @@ Every combination trains one `ranger` model using only OOB predictions (importan
 | Folds | 10 |
 | Repeats | 3 |
 | Total resamples | 30 |
-| Fold assignment | **Grouped by layer UUID** — all spectral replicates of the same soil layer always fall in the same fold, preventing leakage when multiple scans share a single lab measurement. Stratified by quantile bins of group-mean y. Grouped CV design following Roberts et al. (2017). |
+| Fold assignment | **Grouped by layer UUID** — all spectral replicates of the same soil layer always fall in the same fold, preventing leakage when multiple scans share a single lab measurement. Stratified by quantile bins of group-mean y. Grouped assignment follows the leakage-prevention framework of Kaufman & Rosset (2012). |
 | Execution | Parallel (all resamples simultaneously) |
 
 Performance is summarised as **mean ± SD** across all 30 resamples, providing uncertainty estimates for each metric.
@@ -275,13 +275,15 @@ Edit `R/config.R`:
 
 ```r
 TARGET_PROPERTY       <- "oc_usda.c729_w.pct"              # soil property column
-USE_LOG_TARGET        <- TRUE                               # log1p transform?
-PREPROCESSING_METHODS <- c("raw", "sg_deriv1", "snv")      # up to 3 methods
+LOG_MODES             <- c("log", "no_log")                 # "log", "no_log", or both
+PREPROCESSING_METHODS <- c("sg_smooth", "sg_deriv1", "snv") # three treatments
 OSSL_FRACTION         <- 0.20                               # prototype fraction
+N_MAX_SAMPLES         <- 1000                               # cap total rows
 CV_FOLDS              <- 10
 CV_REPEATS            <- 3
 NTREE_CANDIDATES      <- seq(500, 2000, by = 100)
 MTRY_FRACS            <- c(1/9, 1/6, 1/3, 1)
+NODESIZE_CANDIDATES   <- c(3, 5, 10)
 N_CORES               <- NULL                               # NULL = auto
 ```
 
@@ -299,7 +301,7 @@ OSSL data files are downloaded automatically on first run and cached in `data/`.
 
 ```r
 install.packages(c(
-  "ranger", "prospectr", "doParallel", "foreach",
+  "ranger", "prospectr", "doSNOW", "foreach",
   "httr", "ggplot2", "ggpubr", "viridis",
   "dplyr", "tidyr", "readr", "moments"
 ), repos = "https://cloud.r-project.org")
@@ -309,7 +311,7 @@ install.packages(c(
 |---|---|
 | `ranger` | Fast Random Forest (parallelised C++) |
 | `prospectr` | Savitzky–Golay smoothing/derivatives, SNV |
-| `doParallel` / `foreach` | Parallel tuning and CV loops |
+| `doSNOW` / `foreach` | Parallel tuning and CV loops with ASCII progress bar |
 | `httr` | OSSL data download |
 | `ggplot2` / `ggpubr` / `viridis` | Publication-quality figures |
 | `dplyr` / `tidyr` / `readr` | Data wrangling |
@@ -355,8 +357,8 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 
 ### Performance metrics and cross-validation
 - Gauch, H.G., Hwang, J.T.G., & Fick, G.W. (2003). Model evaluation by comparison of model-based predictions and measured values. *Agronomy Journal*, 95(6), 1442–1446. https://doi.org/10.2134/agronj2003.1442
+- Kaufman, S. & Rosset, S. (2012). Leakage in data mining: Formulation, detection, and avoidance. *ACM Transactions on Knowledge Discovery from Data*, 6(4), 15. https://doi.org/10.1145/2382577.2382579
 - Lin, L.I.-K. (1989). A concordance correlation coefficient to evaluate reproducibility. *Biometrics*, 45(1), 255–268. https://doi.org/10.2307/2532051
-- Roberts, D.R., Bahn, V., Ciuti, S., Boyce, M.S., Elith, J., Guillera-Arroita, G., … Dormann, C.F. (2017). Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure. *Ecography*, 40(8), 913–929. https://doi.org/10.1111/ecog.02881
 
 ### OSSL data
 - Safanelli, J.L., Hengl, T., Parente, L., et al. (2023). Open Soil Spectral Library (OSSL): Building reproducible soil calibration models through open development and community engagement. *PLOS ONE*. https://doi.org/10.1371/journal.pone.0296545

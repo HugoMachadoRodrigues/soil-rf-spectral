@@ -6,7 +6,7 @@
 #   1. make_folds() — grouped stratified k-fold × repeat CV index builder.
 #                     Fold assignment at the layer-UUID level prevents leakage
 #                     when multiple spectral replicates share one lab value
-#                     (Roberts et al. 2017).
+#                     (Kaufman & Rosset 2012).
 #
 #   2. tune_rf()    — full 3D grid search over ntree × mtry × min.node.size
 #                     using OOB RMSE (Probst et al. 2019; Liaw & Wiener 2002).
@@ -39,10 +39,10 @@
 #     interpret soil diffuse reflectance spectra. Geoderma, 158(1–2), 46–54.
 #     https://doi.org/10.1016/j.geoderma.2009.12.025
 #
-#   Roberts et al. (2017)    — grouped / spatially-aware CV:
-#     Roberts, D.R. et al. Cross-validation strategies for data with temporal,
-#     spatial, hierarchical, or phylogenetic structure. Ecography, 40(8),
-#     913–929. https://doi.org/10.1111/ecog.02881
+#   Kaufman & Rosset (2012)  — leakage prevention in grouped CV:
+#     Kaufman, S. & Rosset, S. Leakage in data mining: Formulation, detection,
+#     and avoidance. ACM Trans. Knowledge Discovery from Data, 6(4), 15.
+#     https://doi.org/10.1145/2382577.2382579
 #
 # =============================================================================
 
@@ -96,8 +96,8 @@ fmt_time <- function(secs) {
 #' level (e.g. layer UUID), so every row that belongs to the same group is
 #' always assigned to the same fold.  This prevents leakage when multiple
 #' spectral replicates share a single lab measurement — the grouped CV design
-#' recommended by Roberts et al. (2017) for datasets with hierarchical or
-#' replicated structure.
+#' recommended by Kaufman & Rosset (2012) to avoid optimistic bias caused by
+#' correlated observations spanning both training and validation partitions.
 #'
 #' @param y          Numeric response vector.
 #' @param k          Number of folds (default 10).
