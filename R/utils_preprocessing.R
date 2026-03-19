@@ -1,90 +1,79 @@
 # =============================================================================
 # utils_preprocessing.R — Spectral Preprocessing Functions
 # =============================================================================
-# Implements five preprocessing strategies on a numeric matrix X (n × p)
-# where rows = samples and columns = wavelengths.
+# Three preprocessing treatments, all derived from a common SG-smoothed base:
 #
-#   1. raw        – raw reflectance (identity, no transform)
-#   2. sg_smooth  – Savitzky–Golay smoothing (0th derivative)
-#   3. sg_deriv1  – Savitzky–Golay 1st derivative
-#   4. snv        – Standard Normal Variate
-#   5. absorbance – log(1 / R) — pseudo-absorbance from reflectance
+#   Raw reflectance (input)
+#         │
+#         ▼
+#   SG Smooth  ──────────────────► Treatment 1: sg_smooth
+#         │
+#         ├──► SG 1st Derivative ► Treatment 2: sg_deriv1
+#         │
+#         └──► SNV               ► Treatment 3: snv
 #
-# All functions accept and return a numeric matrix with the same dimnames,
-# except SG derivatives which reduce the number of columns by (w - 1).
+# The SG smoothing step is always applied first to reduce high-frequency noise
+# before any further transformation. sg_deriv1 and snv are computed from the
+# smoothed spectra, not from raw reflectance.
+#
+# All functions accept and return a numeric matrix (n × p):
+#   rows    = samples
+#   columns = wavelengths
+# SG derivatives reduce the number of columns by (w − 1) due to edge removal.
 # =============================================================================
 
 library(prospectr)
 
-# ── 1. Raw reflectance ────────────────────────────────────────────────────────
-preprocess_raw <- function(X) {
-  stopifnot(is.matrix(X))
-  X
-}
+# ── Primitive transforms ──────────────────────────────────────────────────────
 
-# ── 2. Savitzky–Golay smoothing (m = 0) ──────────────────────────────────────
-preprocess_sg_smooth <- function(X, w = 11, p = 3) {
+#' Savitzky–Golay smoothing (0th derivative).
+#' @param X Numeric matrix (n × p).
+#' @param w Window size (odd integer).
+#' @param p Polynomial order (p < w).
+sg_smooth <- function(X, w = 11, p = 3) {
   stopifnot(is.matrix(X), w %% 2 == 1, p < w)
-  out <- prospectr::savitzkyGolay(X, w = w, p = p, m = 0)
-  out
+  prospectr::savitzkyGolay(X, w = w, p = p, m = 0)
 }
 
-# ── 3. Savitzky–Golay 1st derivative (m = 1) ─────────────────────────────────
-preprocess_sg_deriv1 <- function(X, w = 11, p = 3) {
+#' Savitzky–Golay 1st derivative.
+#' @param X Numeric matrix already smoothed.
+#' @param w Window size (odd integer).
+#' @param p Polynomial order (p < w).
+sg_deriv1 <- function(X, w = 11, p = 3) {
   stopifnot(is.matrix(X), w %% 2 == 1, p < w)
-  out <- prospectr::savitzkyGolay(X, w = w, p = p, m = 1)
-  out
+  prospectr::savitzkyGolay(X, w = w, p = p, m = 1)
 }
 
-# ── 4. Standard Normal Variate ────────────────────────────────────────────────
-preprocess_snv <- function(X) {
+#' Standard Normal Variate.
+#' @param X Numeric matrix already smoothed.
+snv <- function(X) {
   stopifnot(is.matrix(X))
-  out <- prospectr::standardNormalVariate(X)
-  out
+  prospectr::standardNormalVariate(X)
 }
 
-# ── 5. Absorbance: log(1 / R) ─────────────────────────────────────────────────
-preprocess_absorbance <- function(X) {
-  stopifnot(is.matrix(X))
-  if (any(X <= 0, na.rm = TRUE)) {
-    warning("Non-positive reflectance values found; replacing with small epsilon before log transform.")
-    X[X <= 0] <- .Machine$double.eps
-  }
-  out <- log(1 / X)
-  dimnames(out) <- dimnames(X)
-  out
-}
+# ── Pipeline: builds all three treatments from raw reflectance ────────────────
 
-# ── Dispatcher ────────────────────────────────────────────────────────────────
-#' Apply a named preprocessing method to a reflectance matrix.
+#' Build the three spectral preprocessing treatments from raw reflectance.
 #'
-#' @param X         Numeric matrix (n × p), rows = samples, cols = wavelengths.
-#' @param method    Character: one of "raw", "sg_smooth", "sg_deriv1",
-#'                  "snv", "absorbance".
-#' @param sg_window Savitzky–Golay window size (odd integer).
-#' @param sg_poly   Savitzky–Golay polynomial order.
-#' @return          Preprocessed numeric matrix.
-apply_preprocessing <- function(X, method,
-                                sg_window = 11, sg_poly = 3) {
-  method <- match.arg(method,
-                      c("raw", "sg_smooth", "sg_deriv1", "snv", "absorbance"))
-  switch(method,
-    raw        = preprocess_raw(X),
-    sg_smooth  = preprocess_sg_smooth(X, w = sg_window, p = sg_poly),
-    sg_deriv1  = preprocess_sg_deriv1(X, w = sg_window, p = sg_poly),
-    snv        = preprocess_snv(X),
-    absorbance = preprocess_absorbance(X)
+#' Applies SG smoothing once as the shared base, then derives each treatment:
+#'   - sg_smooth : smoothed spectra (base)
+#'   - sg_deriv1 : SG 1st derivative applied to smoothed spectra
+#'   - snv       : Standard Normal Variate applied to smoothed spectra
+#'
+#' @param X_raw    Numeric matrix of raw reflectance (n × p).
+#' @param sg_window Savitzky–Golay window size (odd integer; default 11).
+#' @param sg_poly   Savitzky–Golay polynomial order (default 3).
+#' @return Named list with three elements: sg_smooth, sg_deriv1, snv.
+build_preprocessing_stack <- function(X_raw, sg_window = 11, sg_poly = 3) {
+  stopifnot(is.matrix(X_raw))
+
+  # Step 1 — shared SG smooth base
+  X_smooth <- sg_smooth(X_raw, w = sg_window, p = sg_poly)
+
+  # Step 2 — three treatments derived from the smooth base
+  list(
+    sg_smooth = X_smooth,
+    sg_deriv1 = sg_deriv1(X_smooth, w = sg_window, p = sg_poly),
+    snv       = snv(X_smooth)
   )
-}
-
-#' Apply all requested preprocessing methods and return a named list.
-#'
-#' @param X       Numeric matrix of raw reflectance.
-#' @param methods Character vector of method names.
-#' @param ...     Forwarded to apply_preprocessing().
-#' @return Named list, one element per method.
-preprocess_all <- function(X, methods, ...) {
-  out <- lapply(methods, function(m) apply_preprocessing(X, m, ...))
-  names(out) <- methods
-  out
 }

@@ -31,15 +31,15 @@ TARGET_LABEL    <- "Soil Organic Carbon (%)"   # used in figures and outputs
 USE_LOG_TARGET <- TRUE
 
 # ── Spectral preprocessing methods ───────────────────────────────────────────
-# Up to three options are evaluated and compared (per proposal).
-# Valid values: "raw", "sg_smooth", "sg_deriv1", "snv", "absorbance"
+# Three treatments, all derived from a common SG-smooth base (see pipeline):
 #
-#   raw        → wavelength-trimmed reflectance only (Option 1 — minimal)
-#   sg_smooth  → Savitzky–Golay smoothing (Option 2 — SG)
-#   sg_deriv1  → SG 1st derivative       (Option 2 — SG derivative)
-#   snv        → Standard Normal Variate (Option 3 — scatter correction)
-#   absorbance → log(1/R)                (alternative to raw reflectance)
-PREPROCESSING_METHODS <- c("raw", "sg_deriv1", "snv")
+#   Treatment 1 — sg_smooth : SG smoothed reflectance (base)
+#   Treatment 2 — sg_deriv1 : SG 1st derivative of the smoothed spectra
+#   Treatment 3 — snv       : SNV applied to the smoothed spectra
+#
+# Do not edit this vector — the three treatments are fixed by design.
+# Adjust SG parameters (window / poly) below if needed.
+PREPROCESSING_METHODS <- c("sg_smooth", "sg_deriv1", "snv")
 
 # Savitzky–Golay parameters (reported in model documentation)
 SG_WINDOW <- 11   # window size (must be odd integer; e.g. 11 = ±5 bands)

@@ -59,10 +59,15 @@ OSSL VisNIR / ASD (350–2500 nm)
    Wavelength trimming + fraction sampling
           │
           ▼
-   Preprocessing ──► Option 1: raw (minimal trim only)    ─┐
-                 ──► Option 2: SG smooth / SG 1st deriv.  ─┤
-                 ──► Option 3: SNV or absorbance log(1/R) ─┘
-                                                           │ (each method evaluated)
+   Raw reflectance
+          │
+          ▼
+   SG Smooth (shared base) ──────────────────► Treatment 1: sg_smooth
+          │
+          ├──► SG 1st Derivative ────────────► Treatment 2: sg_deriv1
+          │
+          └──► SNV ──────────────────────────► Treatment 3: snv
+                                                           │ (each treatment evaluated)
                                                            ▼
                                           Stage 1: ntree convergence
                                           (500–2000, step 100, OOB RMSE)
@@ -86,15 +91,15 @@ OSSL VisNIR / ASD (350–2500 nm)
 
 ## Spectral Preprocessing
 
-| Method | Description | Removes |
-|---|---|---|
-| `raw` | Wavelength-trimmed reflectance, no transform | — |
-| `sg_smooth` | Savitzky–Golay smoothing (m = 0) | High-frequency noise |
-| `sg_deriv1` | Savitzky–Golay 1st derivative (m = 1) | Additive baseline offsets |
-| `snv` | Standard Normal Variate | Multiplicative scatter, path-length variation |
-| `absorbance` | log(1/R) — pseudo-absorbance | Linearises Beer–Lambert relationships |
+SG smoothing is applied to raw reflectance first and serves as the common base for all three treatments. The other two treatments are derived from the smoothed spectra, not from raw reflectance.
 
-SG parameters are configurable (`SG_WINDOW`, `SG_POLY`) and reported in model outputs. All preprocessing is applied identically within each cross-validation resample to prevent data leakage.
+| Treatment | Input | Transform | Removes / Linearises |
+|---|---|---|---|
+| `sg_smooth` | Raw reflectance | SG smooth (m = 0) | High-frequency instrument noise |
+| `sg_deriv1` | SG smooth | SG 1st derivative (m = 1) | Additive baseline offsets and slope effects |
+| `snv` | SG smooth | Standard Normal Variate | Multiplicative scatter and path-length variation |
+
+SG parameters (`SG_WINDOW`, `SG_POLY`) apply uniformly across all treatments and are reported in model outputs. All preprocessing is applied identically within each cross-validation resample to prevent data leakage.
 
 ---
 

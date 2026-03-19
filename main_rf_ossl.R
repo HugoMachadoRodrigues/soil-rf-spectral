@@ -153,11 +153,14 @@ if (USE_LOG_TARGET) {
 }
 
 # ── 2. Preprocessing ──────────────────────────────────────────────────────────
+# Pipeline: raw reflectance → SG smooth → {sg_smooth, sg_deriv1, snv}
+# SG smooth is applied once as the shared base; sg_deriv1 and snv are derived
+# from the smoothed spectra, not from raw reflectance.
 cat("\n── Step 2: Spectral preprocessing ────────────────\n")
+cat(sprintf("  SG parameters: window = %d | poly order = %d\n", SG_WINDOW, SG_POLY))
 
-spec_list <- preprocess_all(
-  X       = X_raw,
-  methods = PREPROCESSING_METHODS,
+spec_list <- build_preprocessing_stack(
+  X_raw     = X_raw,
   sg_window = SG_WINDOW,
   sg_poly   = SG_POLY
 )
