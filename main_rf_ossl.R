@@ -50,7 +50,7 @@ cat("═════════════════════════
 
 # Install any missing packages from CRAN
 pkg_required <- c(
-  "ranger", "prospectr", "foreach", "doParallel",
+  "ranger", "prospectr", "foreach", "doSNOW",
   "ggplot2", "ggpubr", "viridis", "moments", "httr",
   "dplyr", "tidyr", "readr"
 )

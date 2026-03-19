@@ -16,7 +16,45 @@
 
 library(ranger)
 library(foreach)
-library(doParallel)
+library(doSNOW)     # progress-bar-aware parallel backend
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+# Format elapsed/ETA seconds as "Xm Ys" or "Xs".
+fmt_time <- function(secs) {
+  secs <- max(0, round(as.numeric(secs)))
+  if (secs < 60L) return(sprintf("%ds", secs))
+  sprintf("%dm %02ds", secs %/% 60L, secs %% 60L)
+}
+
+# Build a doSNOW progress-callback that writes an ASCII progress bar + ETA
+# to stderr(), overwriting the same console line with \r.
+#
+# @param n_total  Total number of parallel tasks.
+# @param start_t  proc.time()["elapsed"] captured just before foreach().
+# @return A function(n_done) suitable for .options.snow = list(progress = ...).
+.make_progress_fn <- function(n_total, start_t) {
+  bar_w <- 38L
+  function(n_done) {
+    elapsed <- proc.time()["elapsed"] - start_t
+    rate    <- if (n_done > 0L) elapsed / n_done else 0
+    eta     <- if (rate > 0) rate * (n_total - n_done) else NA_real_
+    pct     <- n_done / n_total
+    filled  <- round(bar_w * pct)
+    bar <- paste0(
+      strrep("=", max(0L, filled - 1L)),
+      if (filled > 0L && n_done < n_total) ">" else if (filled > 0L) "=" else "",
+      strrep(" ", bar_w - filled)
+    )
+    cat(sprintf("\r  [%s] %d/%d (%.0f%%) | %s elapsed | ETA %s   ",
+                bar, n_done, n_total, pct * 100,
+                fmt_time(elapsed),
+                if (is.na(eta)) "..." else fmt_time(eta)),
+        file = stderr())
+    flush(stderr())
+    if (n_done == n_total) cat("\n", file = stderr())
+  }
+}
 
 # ── CV fold construction ──────────────────────────────────────────────────────
 
@@ -138,7 +176,7 @@ tune_rf <- function(X, y,
   # Translate mtry fractions → actual integer values (at least 1)
   mtry_vals <- pmax(1L, unique(round(mtry_fracs * p)))
 
-  # Full 3D grid
+  # Full 3D grid: all combinations evaluated simultaneously
   grid <- expand.grid(
     ntree        = ntree_candidates,
     mtry         = mtry_vals,
@@ -147,8 +185,20 @@ tune_rf <- function(X, y,
   )
   n_comb <- nrow(grid)
 
-  message(sprintf(
-    "[Tuning] Full 3D grid — %d ntree × %d mtry × %d nodesize = %d combinations | Cores: %d",
+  # ── Grid summary ───────────────────────────────────────────────────────────
+  cat(sprintf(
+    "\n  [Tuning] Full 3D grid search\n  %s\n  ntree  : %d values — %d to %d (step %d)\n  mtry   : %d values — %s\n  node   : %d values — %s\n  %s\n  Total  : %d × %d × %d = %d combinations | %d cores\n\n",
+    strrep("─", 55),
+    length(ntree_candidates),
+    min(ntree_candidates), max(ntree_candidates),
+    if (length(ntree_candidates) > 1L)
+      as.integer(diff(range(ntree_candidates)) / (length(ntree_candidates) - 1L))
+    else 0L,
+    length(mtry_vals),
+    paste(mtry_vals, collapse = ", "),
+    length(nodesize_vals),
+    paste(nodesize_vals, collapse = ", "),
+    strrep("─", 55),
     length(ntree_candidates), length(mtry_vals), length(nodesize_vals),
     n_comb, n_cores
   ))
@@ -157,14 +207,18 @@ tune_rf <- function(X, y,
   df_all[[".y"]] <- y
 
   cl <- parallel::makeCluster(n_cores)
-  doParallel::registerDoParallel(cl)
-  on.exit({ parallel::stopCluster(cl); doParallel::stopImplicitCluster() },
-          add = TRUE)
+  doSNOW::registerDoSNOW(cl)
+  on.exit({ parallel::stopCluster(cl) }, add = TRUE)
+
+  start_t  <- proc.time()["elapsed"]
+  prog_fn  <- .make_progress_fn(n_comb, start_t)
+  opts     <- list(progress = prog_fn)
 
   results <- foreach::foreach(
-    i         = seq_len(n_comb),
-    .packages = "ranger",
-    .combine  = rbind
+    i             = seq_len(n_comb),
+    .packages     = "ranger",
+    .combine      = rbind,
+    .options.snow = opts
   ) %dopar% {
     set.seed(seed + i)
     fit <- ranger::ranger(
@@ -180,13 +234,23 @@ tune_rf <- function(X, y,
       oob_r2   = fit$r.squared)
   }
 
+  total_t       <- proc.time()["elapsed"] - start_t
   grid$oob_rmse <- results[, "oob_rmse"]
   grid$oob_r2   <- results[, "oob_r2"]
   grid          <- grid[order(grid$oob_rmse), ]
   best          <- grid[1L, ]
 
-  message(sprintf(
-    "  → Best: ntree = %d | mtry = %d | min.node.size = %d | OOB RMSE = %.4f | OOB R² = %.4f",
+  # ── Results table (top 10) ─────────────────────────────────────────────────
+  cat(sprintf("  Completed in %s\n\n", fmt_time(total_t)))
+  cat("  Top 10 combinations (ordered by OOB RMSE):\n")
+  top10 <- head(grid, 10L)
+  top10$oob_rmse <- round(top10$oob_rmse, 4)
+  top10$oob_r2   <- round(top10$oob_r2,   4)
+  rownames(top10) <- NULL
+  print(top10[, c("ntree", "mtry", "min_nodesize", "oob_rmse", "oob_r2")],
+        row.names = FALSE)
+  cat(sprintf(
+    "\n  \u2192 Best: ntree = %d | mtry = %d | node = %d | OOB RMSE = %.4f | OOB R\u00b2 = %.4f\n\n",
     best$ntree, best$mtry, best$min_nodesize, best$oob_rmse, best$oob_r2
   ))
 
@@ -228,9 +292,11 @@ cv_rf <- function(X, y,
   if (is.null(n_cores)) n_cores <- max(1L, parallel::detectCores() - 1L)
   n_resamples <- length(folds)
 
-  message(sprintf(
-    "[CV] %d resamples | ntree = %d | mtry = %d | min.node.size = %d | Cores = %d",
+  cat(sprintf(
+    "  [CV] %d resamples (%d-fold × %d-repeat) | ntree = %d | mtry = %d | node = %d | %d cores\n\n",
     n_resamples,
+    length(unique(seq_len(n_resamples) %% (n_resamples %/% 3L))),  # approx folds
+    3L,
     best_params$ntree,
     best_params$mtry,
     best_params$min_nodesize,
@@ -238,15 +304,19 @@ cv_rf <- function(X, y,
   ))
 
   cl <- parallel::makeCluster(n_cores)
-  doParallel::registerDoParallel(cl)
-  on.exit({ parallel::stopCluster(cl); doParallel::stopImplicitCluster() },
-          add = TRUE)
+  doSNOW::registerDoSNOW(cl)
+  on.exit({ parallel::stopCluster(cl) }, add = TRUE)
+
+  start_t <- proc.time()["elapsed"]
+  prog_fn <- .make_progress_fn(n_resamples, start_t)
+  opts    <- list(progress = prog_fn)
 
   resample_results <- foreach::foreach(
-    f         = seq_len(n_resamples),
-    .packages = "ranger",
-    .combine  = "list",
-    .multicombine = TRUE
+    f             = seq_len(n_resamples),
+    .packages     = "ranger",
+    .combine      = "list",
+    .multicombine = TRUE,
+    .options.snow = opts
   ) %dopar% {
     val_idx   <- folds[[f]]
     train_idx <- setdiff(seq_len(nrow(X)), val_idx)
@@ -278,6 +348,8 @@ cv_rf <- function(X, y,
       importance = fit$variable.importance
     )
   }
+
+  cat(sprintf("  CV completed in %s\n\n", fmt_time(proc.time()["elapsed"] - start_t)))
 
   # ── Assemble full prediction table ────────────────────────────────────────
   obs_pred <- data.frame(
