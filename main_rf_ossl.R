@@ -24,7 +24,7 @@ cat("═════════════════════════
 pkg_required <- c(
   "ranger", "prospectr", "foreach", "doParallel",
   "ggplot2", "ggpubr", "viridis", "moments", "httr",
-  "dplyr", "tidyr", "readr", "qs2"
+  "dplyr", "tidyr", "readr"
 )
 pkg_missing <- pkg_required[!sapply(pkg_required, requireNamespace, quietly = TRUE)]
 if (length(pkg_missing) > 0) {
@@ -36,7 +36,6 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)
   library(readr)
-  library(qs2)
   library(httr)
 })
 
@@ -62,13 +61,13 @@ cat("── Step 1: Loading OSSL data ──────────────
 
 # OSSL public data — version 1.2
 # Files can also be downloaded manually from https://soilspectroscopy.org
-# VisNIR spectral data is distributed at L0 processing level (L1 only exists
-# in the merged ossl_all file). Lab data is at L1.
-ossl_visnir_url  <- "https://storage.googleapis.com/soilspec4gg-public/ossl_visnir_L0_v1.2.qs"
-ossl_soillab_url <- "https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.qs"
+# CSV.gz format: no special serialisation package required; readr handles
+# gzip decompression transparently. VisNIR is at L0; lab data at L1.
+ossl_visnir_url  <- "https://storage.googleapis.com/soilspec4gg-public/ossl_visnir_L0_v1.2.csv.gz"
+ossl_soillab_url <- "https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.csv.gz"
 
-ossl_visnir_local  <- file.path(DATA_DIR, "ossl_visnir_L0_v1.2.qs")
-ossl_soillab_local <- file.path(DATA_DIR, "ossl_soillab_L1_v1.2.qs")
+ossl_visnir_local  <- file.path(DATA_DIR, "ossl_visnir_L0_v1.2.csv.gz")
+ossl_soillab_local <- file.path(DATA_DIR, "ossl_soillab_L1_v1.2.csv.gz")
 
 download_if_missing <- function(url, dest) {
   if (!file.exists(dest)) {
@@ -86,9 +85,8 @@ download_if_missing(ossl_visnir_url,  ossl_visnir_local)
 download_if_missing(ossl_soillab_url, ossl_soillab_local)
 
 cat("Reading spectral data...\n")
-# qread_qs1() reads files written by the original qs package (OSSL v1.2 format)
-visnir_raw <- qs2::qread_qs1(ossl_visnir_local)
-soillab    <- qs2::qread_qs1(ossl_soillab_local)
+visnir_raw <- readr::read_csv(ossl_visnir_local,  show_col_types = FALSE)
+soillab    <- readr::read_csv(ossl_soillab_local, show_col_types = FALSE)
 
 # ── Filter to ASD sensor ──────────────────────────────────────────────────────
 # ASD FieldSpec columns: scan_visnir.350_ref … scan_visnir.2500_ref (1-nm steps)

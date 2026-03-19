@@ -10,6 +10,7 @@ output/models/*.rds
 
 # Data (raw OSSL files are large; regenerated via download)
 data/*.qs
+data/*.csv.gz
 data/*.csv
 data/*.parquet
 
