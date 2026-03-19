@@ -18,7 +18,10 @@
 #           X/Twitter: https://x.com/Hugo_MRodrigues
 #           LinkedIn : https://www.linkedin.com/in/hugo-rodrigues-52b535119/
 #
-# Inspired by: Clingensmith, C. & Grunwald, S. — NRCS Soil Spectral Modeling
+# Inspired by: Clingensmith, C.M. & Grunwald, S. (2022). Predicting soil
+#              properties and interpreting Vis-NIR models from across
+#              continental United States. Sensors, 22(9), 3187.
+#              https://doi.org/10.3390/s22093187
 # Date    : 2026
 # =============================================================================
 

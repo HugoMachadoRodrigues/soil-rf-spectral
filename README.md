@@ -25,7 +25,7 @@
 
 This repository implements the soil spectral modeling workflow described in the **BMP Mini Proposal: Soil Spectral Modeling Assignments (Random Forest Prototype)**. The goal is to develop prototype Random Forest (RF) models linking ASD VisNIR spectra to soil laboratory measurements for Years 1–5 of the BMP project, generating report-ready figures and performance tables for the annual report.
 
-The pipeline is inspired by and adapted from the work of **Clingensmith, C. & Grunwald, S.** (NRCS Soil Spectral Modeling Project), extended with intelligent hyperparameter tuning, repeated cross-validation, and a complete metric suite including Lin's CCC.
+The pipeline is inspired by and adapted from **Clingensmith & Grunwald (2022)**, who developed RF models linking VisNIR spectra to soil properties across the continental United States, extended here with full 3D hyperparameter tuning, grouped repeated cross-validation, and a complete metric suite including Lin's CCC and MSD decomposition.
 
 ### Target soil properties
 
@@ -362,7 +362,7 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 - Safanelli, J.L., Hengl, T., Parente, L., et al. (2023). Open Soil Spectral Library (OSSL): Building reproducible soil calibration models through open development and community engagement. *PLOS ONE*. https://doi.org/10.1371/journal.pone.0296545
 
 ### Pipeline inspiration
-- Clingensmith, C.M. & Grunwald, S. — NRCS Soil Spectral Modeling Project (internal reference).
+- Clingensmith, C.M. & Grunwald, S. (2022). Predicting soil properties and interpreting Vis-NIR models from across continental United States. *Sensors*, 22(9), 3187. https://doi.org/10.3390/s22093187
 
 ---
 

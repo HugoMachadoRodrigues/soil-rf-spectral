@@ -3,8 +3,8 @@
 # =============================================================================
 # Implements the full set of metrics required by the BMP project proposal:
 #   RMSE, MAE, R², ME (bias), RPD, RPIQ, CCC
-# plus the MSD decomposition framework (Gauch et al. 2003) inspired by
-# Clingensmith & Grunwald (NRCS Soil Spectral Modeling Project):
+# plus the MSD decomposition framework (Gauch et al. 2003) following the
+# approach of Clingensmith & Grunwald (2022, Sensors 22(9):3187):
 #   MSE = SB + NU + LC
 #
 # Formulas
