@@ -62,10 +62,12 @@ cat("── Step 1: Loading OSSL data ──────────────
 
 # OSSL public data — version 1.2
 # Files can also be downloaded manually from https://soilspectroscopy.org
-ossl_visnir_url <- "https://storage.googleapis.com/soilspec4gg-public/ossl_visnir_L1_v1.2.qs"
+# VisNIR spectral data is distributed at L0 processing level (L1 only exists
+# in the merged ossl_all file). Lab data is at L1.
+ossl_visnir_url  <- "https://storage.googleapis.com/soilspec4gg-public/ossl_visnir_L0_v1.2.qs"
 ossl_soillab_url <- "https://storage.googleapis.com/soilspec4gg-public/ossl_soillab_L1_v1.2.qs"
 
-ossl_visnir_local  <- file.path(DATA_DIR, "ossl_visnir_L1_v1.2.qs")
+ossl_visnir_local  <- file.path(DATA_DIR, "ossl_visnir_L0_v1.2.qs")
 ossl_soillab_local <- file.path(DATA_DIR, "ossl_soillab_L1_v1.2.qs")
 
 download_if_missing <- function(url, dest) {
