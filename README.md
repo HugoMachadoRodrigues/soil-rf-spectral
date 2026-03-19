@@ -1,31 +1,31 @@
 # Soil Spectral Modeling with Random Forest
 
-> **A reproducible, parallelised pipeline for predicting soil properties from VisNIR spectroscopy using tuned Random Forests and multiple spectral preprocessing strategies.**
+> **A reproducible, parallelised pipeline for predicting soil properties from VisNIR spectroscopy (ASD FieldSpec 4, 350–2500 nm) using tuned Random Forests and multiple spectral preprocessing strategies.**
 
 ---
 
-## Overview
+## Project Context
 
-This repository implements an end-to-end soil spectral modeling workflow using the [Open Soil Spectral Library (OSSL)](https://soilspectroscopy.org) and ASD FieldSpec VisNIR data (350–2500 nm). The pipeline is inspired by the work of Clingensmith & Grunwald (NRCS Soil Spectral Modeling Project) and extends it with:
+This repository implements the soil spectral modeling workflow described in the **BMP Mini Proposal: Soil Spectral Modeling Assignments (Random Forest Prototype)**. The goal is to develop prototype Random Forest (RF) models linking ASD VisNIR spectra to soil laboratory measurements for Years 1–5 of the BMP project, generating report-ready figures and performance tables for the annual report.
 
-- **Modular spectral preprocessing** — four strategies evaluated in parallel
-- **Intelligent hyperparameter tuning** — OOB-based grid search (no data leakage)
-- **Stratified k-fold cross-validation** — robust performance estimation
-- **Parallelisation** throughout via `doParallel` / `foreach`
-- **Comprehensive diagnostic output** — metrics, figures, and serialised models
+The pipeline is inspired by and adapted from the work of **Clingensmith, C. & Grunwald, S.** (NRCS Soil Spectral Modeling Project), extended with intelligent hyperparameter tuning, repeated cross-validation, and a complete metric suite including Lin's CCC.
 
----
+### Target soil properties
 
-## Preprocessing Strategies
-
-| Method | Description |
+| Variable | Description |
 |---|---|
-| `sg_smooth` | Savitzky–Golay smoothing (0th derivative) — noise reduction |
-| `sg_deriv1` | Savitzky–Golay 1st derivative — removes additive baseline effects |
-| `snv` | Standard Normal Variate — corrects for scatter and path-length variation |
-| `absorbance` | log(1/R) — pseudo-absorbance, linearises Beer–Lambert relationships |
+| pH | Soil pH |
+| TP | Total phosphorus |
+| M3-P | Mehlich-3 extractable phosphorus |
+| WEP | Water-extractable phosphorus |
+| TC | Total carbon |
+| TN | Total nitrogen |
+| Fe | Iron |
+| Al | Aluminum |
+| Ca | Calcium |
+| Mg | Magnesium |
 
-All SG methods use configurable window size and polynomial order (see `R/config.R`).
+> **Prototype stage:** The pipeline uses the Open Soil Spectral Library (OSSL) with ASD sensor data. Replace the data loading section with your project database when the Years 1–5 dataset is ready.
 
 ---
 
@@ -33,18 +33,18 @@ All SG methods use configurable window size and polynomial order (see `R/config.
 
 ```
 soil-rf-spectral/
-├── main_rf_ossl.R          # Main pipeline — entry point
+├── main_rf_ossl.R               # Entry point — run this script
 ├── R/
-│   ├── config.R            # All user-configurable parameters
-│   ├── utils_preprocessing.R  # Spectral preprocessing functions
-│   ├── utils_metrics.R        # MSD-based performance metrics
-│   ├── utils_rf.R             # Tuning, CV, and final model fitting
-│   └── utils_visualization.R  # ggplot2-based figures
-├── data/                   # OSSL files downloaded automatically (gitignored)
+│   ├── config.R                 # All tunable parameters (edit before running)
+│   ├── utils_preprocessing.R    # Spectral preprocessing functions
+│   ├── utils_metrics.R          # Performance metrics with formulas
+│   ├── utils_rf.R               # Hyperparameter tuning and cross-validation
+│   └── utils_visualization.R    # ggplot2 figures
+├── data/                        # OSSL files (auto-downloaded; gitignored)
 ├── output/
-│   ├── models/             # Serialised ranger objects (.qs)
-│   ├── metrics/            # CSV metric tables
-│   └── figures/            # Plots (PNG / PDF)
+│   ├── models/                  # Serialised ranger objects (.qs)
+│   ├── metrics/                 # CSV performance tables
+│   └── figures/                 # Plots (PNG / PDF)
 └── README.md
 ```
 
@@ -53,71 +53,213 @@ soil-rf-spectral/
 ## Modeling Workflow
 
 ```
-OSSL VisNIR (ASD)
-       │
-       ▼
-  Random fraction (configurable %)
-       │
-       ▼
-  Preprocessing ──► sg_smooth ──┐
-                ──► sg_deriv1 ──┤
-                ──► snv ────────┤
-                ──► absorbance ─┘
-                                │ (for each method)
-                                ▼
-                   Hyperparameter Tuning
-                   (OOB grid: mtry × min.node.size)
-                                │
-                                ▼
-                   k-fold Cross-Validation
-                   (stratified, parallelised)
-                                │
-                                ▼
-                   Final Model (full dataset)
-                                │
-                                ▼
-              Metrics · Figures · Saved Models
+OSSL VisNIR / ASD (350–2500 nm)
+          │
+          ▼
+   Wavelength trimming + fraction sampling
+          │
+          ▼
+   Preprocessing ──► Option 1: raw (minimal trim only)    ─┐
+                 ──► Option 2: SG smooth / SG 1st deriv.  ─┤
+                 ──► Option 3: SNV or absorbance log(1/R) ─┘
+                                                           │ (each method evaluated)
+                                                           ▼
+                                          Stage 1: ntree convergence
+                                          (500–2000, step 100, OOB RMSE)
+                                                           │
+                                                           ▼
+                                          Stage 2: mtry × min.node.size grid
+                                          (fracs: 1/9, 1/6, 1/3, 1 of p)
+                                                           │
+                                                           ▼
+                                   10-fold × 3-repeat stratified CV
+                                   (30 resamples; parallel execution)
+                                                           │
+                                                           ▼
+                                   Final model (full dataset)
+                                                           │
+                                                           ▼
+                          Metrics · Figures · Saved models · CSV tables
 ```
+
+---
+
+## Spectral Preprocessing
+
+| Method | Description | Removes |
+|---|---|---|
+| `raw` | Wavelength-trimmed reflectance, no transform | — |
+| `sg_smooth` | Savitzky–Golay smoothing (m = 0) | High-frequency noise |
+| `sg_deriv1` | Savitzky–Golay 1st derivative (m = 1) | Additive baseline offsets |
+| `snv` | Standard Normal Variate | Multiplicative scatter, path-length variation |
+| `absorbance` | log(1/R) — pseudo-absorbance | Linearises Beer–Lambert relationships |
+
+SG parameters are configurable (`SG_WINDOW`, `SG_POLY`) and reported in model outputs. All preprocessing is applied identically within each cross-validation resample to prevent data leakage.
 
 ---
 
 ## Performance Metrics
 
-Inspired by the MSD (Mean Squared Deviation) decomposition framework:
+All metrics are computed on the **original measurement scale** after back-transformation (when `USE_LOG_TARGET = TRUE`). For repeated CV, values are reported as **mean ± SD across all 30 resamples** (10 folds × 3 repeats).
 
-| Metric | Description |
+---
+
+### Notation
+
+| Symbol | Meaning |
 |---|---|
-| R² | Coefficient of determination |
-| RMSE | Root mean squared error |
-| Bias | Systematic prediction offset |
-| RPD | Residual Prediction Deviation (SD / RMSE) |
-| RPIQ | Ratio of Performance to InterQuartile range |
-| SB | Squared Bias (MSD component) |
-| NU | Non-Unity slope (MSD component) |
-| LC | Lack of Correlation (MSD component) |
+| n | Number of observations |
+| yᵢ | Observed value for sample i |
+| ŷᵢ | Predicted value for sample i |
+| ȳ | Mean of observed values |
+| ȳ̂ | Mean of predicted values |
+| sᵧ | Sample SD of observed values |
+| sŷ | Sample SD of predicted values |
+| r | Pearson correlation coefficient |
+| b | Slope of OLS regression ŷ = a + b·y |
+
+---
+
+### Primary Metrics
+
+**ME — Mean Error (signed bias)**
+
+$$\text{ME} = \frac{1}{n} \sum_{i=1}^{n} (\hat{y}_i - y_i)$$
+
+Positive values indicate systematic over-prediction; negative values indicate under-prediction.
+
+---
+
+**RMSE — Root Mean Squared Error**
+
+$$\text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (\hat{y}_i - y_i)^2}$$
+
+Penalises large errors more heavily than MAE.
+
+---
+
+**MAE — Mean Absolute Error**
+
+$$\text{MAE} = \frac{1}{n} \sum_{i=1}^{n} |\hat{y}_i - y_i|$$
+
+Robust to outliers; same units as the response variable.
+
+---
+
+**R² — Coefficient of Determination**
+
+$$R^2 = 1 - \frac{\sum_{i=1}^{n}(y_i - \hat{y}_i)^2}{\sum_{i=1}^{n}(y_i - \bar{y})^2}$$
+
+Proportion of variance in y explained by ŷ. Computed from the regression of observed on predicted.
+
+---
+
+**RPD — Residual Prediction Deviation** *(Chang et al. 2001)*
+
+$$\text{RPD} = \frac{s_y}{\text{RMSE}}$$
+
+| RPD range | Model quality |
+|---|---|
+| < 1.5 | Poor — not recommended |
+| 1.5 – 2.0 | Fair — rough quantitative estimates |
+| 2.0 – 2.5 | Good — quantitative predictions |
+| > 2.5 | Excellent |
+
+---
+
+**RPIQ — Ratio of Performance to InterQuartile range** *(Bellon-Maurel et al. 2010)*
+
+$$\text{RPIQ} = \frac{Q_3 - Q_1}{\text{RMSE}}$$
+
+Preferred over RPD for skewed or non-normal distributions (e.g., P fractions, Fe, Al).
+
+---
+
+**CCC — Lin's Concordance Correlation Coefficient** *(Lin 1989)*
+
+$$\text{CCC} = \frac{2 \, s_{y\hat{y}}}{s_y^2 + s_{\hat{y}}^2 + (\bar{y} - \bar{\hat{y}})^2}$$
+
+where $s_{y\hat{y}}$ is the covariance of observed and predicted values (n denominator).
+
+CCC ∈ [−1, 1]. It combines **precision** (captured by r) with **accuracy** (distance from the 1:1 line). A model with high r but systematic bias will have CCC < r.
+
+---
+
+### MSD Decomposition *(Gauch et al. 2003)*
+
+The Mean Squared Deviation decomposes into three additive components:
+
+$$\text{MSE} = \underbrace{(\bar{\hat{y}} - \bar{y})^2}_{\text{SB}} \;+\; \underbrace{(1 - b)^2 \, \sigma_{\hat{y}}^2}_{\text{NU}} \;+\; \underbrace{(1 - r^2) \, \sigma_y^2}_{\text{LC}}$$
+
+| Component | Name | Meaning |
+|---|---|---|
+| SB | Squared Bias | Systematic offset — model consistently over- or under-predicts |
+| NU | Non-Unity slope | Scale error — predictions spread too wide or too narrow |
+| LC | Lack of Correlation | Random error — irreducible noise not captured by any trend |
+
+A well-calibrated model has SB ≈ 0, NU ≈ 0, with most error in LC.
+
+> *σ² denotes population variance (n denominator) for additive consistency of the decomposition.*
+
+---
+
+## Hyperparameter Tuning
+
+Tuning is performed entirely on the **training set using OOB error**, avoiding any information leakage from the validation folds.
+
+### Stage 1 — ntree convergence
+
+ntree is evaluated from 500 to 2000 in steps of 100. The smallest ntree whose OOB RMSE is within 0.1% of the global minimum is selected as the operating value.
+
+### Stage 2 — mtry × min.node.size grid
+
+| Parameter | Candidates |
+|---|---|
+| `mtry` | ⌊p/9⌋, ⌊p/6⌋, ⌊p/3⌋, p (fractions of total predictors p) |
+| `min.node.size` | 3, 5, 10 |
+
+All combinations are evaluated in parallel. The combination with the lowest OOB RMSE is used for cross-validation and the final model.
+
+---
+
+## Cross-Validation
+
+| Setting | Value |
+|---|---|
+| Strategy | k-fold repeated CV |
+| Folds | 10 |
+| Repeats | 3 |
+| Total resamples | 30 |
+| Fold assignment | Stratified by quantile bins of the target |
+| Execution | Parallel (all resamples simultaneously) |
+
+Performance is summarised as **mean ± SD** across all 30 resamples, providing uncertainty estimates for each metric.
 
 ---
 
 ## Quick Start
 
-### 1. Clone the repository
+### 1. Clone
 
 ```bash
-git clone https://github.com/<your-org>/soil-rf-spectral.git
+git clone https://github.com/HugoMachadoRodrigues/soil-rf-spectral.git
 cd soil-rf-spectral
 ```
 
 ### 2. Configure
 
-Edit `R/config.R` to set:
+Edit `R/config.R`:
 
 ```r
-TARGET_PROPERTY       <- "oc_usda.c729_w.pct"   # soil property
-USE_LOG_TARGET        <- TRUE                    # log-transform target?
-PREPROCESSING_METHODS <- c("sg_smooth", "sg_deriv1", "snv", "absorbance")
-OSSL_FRACTION         <- 0.20                    # fraction of OSSL to use
+TARGET_PROPERTY       <- "oc_usda.c729_w.pct"              # soil property column
+USE_LOG_TARGET        <- TRUE                               # log1p transform?
+PREPROCESSING_METHODS <- c("raw", "sg_deriv1", "snv")      # up to 3 methods
+OSSL_FRACTION         <- 0.20                               # prototype fraction
 CV_FOLDS              <- 10
-N_CORES               <- NULL                    # NULL = all cores minus 1
+CV_REPEATS            <- 3
+NTREE_CANDIDATES      <- seq(500, 2000, by = 100)
+MTRY_FRACS            <- c(1/9, 1/6, 1/3, 1)
+N_CORES               <- NULL                               # NULL = auto
 ```
 
 ### 3. Run
@@ -132,20 +274,6 @@ OSSL data files are downloaded automatically on first run and cached in `data/`.
 
 ## Dependencies
 
-| Package | Purpose |
-|---|---|
-| `ranger` | Fast Random Forest implementation |
-| `prospectr` | Savitzky–Golay, SNV spectral preprocessing |
-| `doParallel` / `foreach` | Parallel tuning and CV |
-| `qs` | Fast serialisation of R objects and OSSL files |
-| `httr` | OSSL data download |
-| `ggplot2` / `ggpubr` / `viridis` | Figures |
-| `dplyr` / `tidyr` / `readr` | Data wrangling |
-| `moments` | Skewness / kurtosis |
-| `here` | Reproducible file paths |
-
-Install all dependencies at once:
-
 ```r
 install.packages("pak")
 pak::pkg_install(c(
@@ -155,39 +283,60 @@ pak::pkg_install(c(
 ))
 ```
 
+| Package | Purpose |
+|---|---|
+| `ranger` | Fast Random Forest (parallelised C++) |
+| `prospectr` | Savitzky–Golay smoothing/derivatives, SNV |
+| `doParallel` / `foreach` | Parallel tuning and CV loops |
+| `qs` | Fast serialisation of R objects and OSSL data |
+| `httr` | OSSL data download |
+| `ggplot2` / `ggpubr` / `viridis` | Publication-quality figures |
+| `dplyr` / `tidyr` / `readr` | Data wrangling |
+| `moments` | Skewness / kurtosis for summary statistics |
+| `here` | Reproducible relative file paths |
+
 ---
 
-## Data Source
+## Deliverables (per proposal)
 
-This pipeline uses the **Open Soil Spectral Library (OSSL)** — a global, harmonised collection of soil spectral and laboratory data.
+- [ ] Analysis-ready Years 1–5 modeling dataset with documented QA/QC
+- [x] Reproducible R scripts for preprocessing, tuning, and CV
+- [x] Performance summary table (RMSE, MAE, R², ME, RPD, RPIQ, CCC ± SD)
+- [x] Figures: raw vs. processed spectra, variable importance, observed vs. predicted
 
-> Safanelli, J.L., Hengl, T., Parente, L., et al. (2023). *Open Soil Spectral Library (OSSL): Building reproducible soil calibration models through open development and community engagement.* PLOS ONE. https://doi.org/10.1371/journal.pone.0296545
+---
+
+## Data Source (prototype)
+
+**Open Soil Spectral Library (OSSL)**
+
+> Safanelli, J.L., Hengl, T., Parente, L., et al. (2023). Open Soil Spectral Library (OSSL): Building reproducible soil calibration models through open development and community engagement. *PLOS ONE*. https://doi.org/10.1371/journal.pone.0296545
 
 OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ---
 
-## Citation
+## References
 
-If you use this pipeline in your research, please cite:
+- Bellon-Maurel, V., Fernandez-Ahumada, E., Palagos, B., Roger, J.-M., & McBratney, A. (2010). Critical review of chemometric indicators commonly used for assessing the quality of the prediction of soil attributes by NIR spectroscopy. *TrAC Trends in Analytical Chemistry*, 29(9), 1073–1081.
+- Chang, C.-W., Laird, D.A., Mausbach, M.J., & Hurburgh, C.R. (2001). Near-infrared reflectance spectroscopy–principal components regression analyses of soil properties. *Soil Science Society of America Journal*, 65(2), 480–490.
+- Gauch, H.G., Hwang, J.T.G., & Fick, G.W. (2003). Model evaluation by comparison of model-based predictions and measured values. *Agronomy Journal*, 95(6), 1442–1446.
+- Lin, L.I.-K. (1989). A concordance correlation coefficient to evaluate reproducibility. *Biometrics*, 45(1), 255–268.
+- Clingensmith, C.M. & Grunwald, S. — NRCS Soil Spectral Modeling Project (internal reference).
+
+---
+
+## Citation
 
 ```bibtex
 @software{soil_rf_spectral_2024,
-  author  = {[Your Name]},
-  title   = {Soil Spectral Modeling with Random Forest},
+  author  = {Rodrigues, Hugo M.},
+  title   = {Soil Spectral Modeling with Random Forest — BMP Project},
   year    = {2024},
-  url     = {https://github.com/<your-org>/soil-rf-spectral}
+  url     = {https://github.com/HugoMachadoRodrigues/soil-rf-spectral}
 }
 ```
 
 ---
 
-## Acknowledgements
-
-Preprocessing and metric design inspired by:
-- Clingensmith, C.M. & Grunwald, S. — NRCS Soil Spectral Modeling Project
-- Gauch, H.G., Hwang, J.T.G., & Fick, G.W. (2003). Model evaluation by comparison of model-based predictions and measured values. *Agronomy Journal*, 95(6), 1442–1446.
-
----
-
-*Built with R · ranger · OSSL*
+*Built with R · ranger · OSSL — BMP Project, University of Florida*

@@ -187,23 +187,25 @@ for (prep_name in names(spec_list)) {
   # ── Step 3: Tuning ──────────────────────────────────────────────────────────
   cat("\n[3] Hyperparameter Tuning\n")
   tune_res <- tune_rf(
-    X              = X_prep,
-    y              = y_model,
-    mtry_fracs     = MTRY_CANDIDATES,
-    nodesize_vals  = NODESIZE_CANDIDATES,
-    num_trees      = NUM_TREES_TUNE,
-    n_cores        = N_CORES,
-    seed           = SEED
+    X                = X_prep,
+    y                = y_model,
+    ntree_candidates = NTREE_CANDIDATES,
+    mtry_fracs       = MTRY_FRACS,
+    nodesize_vals    = NODESIZE_CANDIDATES,
+    n_cores          = N_CORES,
+    seed             = SEED
   )
 
-  cat("\nTuning grid (ordered by OOB RMSE):\n")
-  print(tune_res$grid, row.names = FALSE, digits = 5)
-  cat(sprintf("\nBest: mtry = %d | min.node.size = %d | OOB RMSE = %.5f | OOB R² = %.4f\n\n",
-              tune_res$best$mtry, tune_res$best$min_nodesize,
+  cat(sprintf("\nntree convergence — selected: %d\n", tune_res$ntree_sel))
+  cat("\nStage 2 grid (ordered by OOB RMSE):\n")
+  print(tune_res$stage2[, c("ntree","mtry","min_nodesize","oob_rmse","oob_r2")],
+        row.names = FALSE, digits = 5)
+  cat(sprintf("\nBest: ntree = %d | mtry = %d | min.node.size = %d | OOB RMSE = %.5f | OOB R² = %.4f\n\n",
+              tune_res$best$ntree, tune_res$best$mtry, tune_res$best$min_nodesize,
               tune_res$best$oob_rmse, tune_res$best$oob_r2))
 
   # Save tuning grid plot
-  p_tune <- plot_tuning_grid(tune_res$grid,
+  p_tune <- plot_tuning_grid(tune_res$stage2,
                               title = sprintf("Tuning Grid — %s [%s]",
                                              TARGET_LABEL, prep_name))
   save_plot(p_tune,
@@ -212,8 +214,9 @@ for (prep_name in names(spec_list)) {
             devices  = PLOT_DEVICES, dpi = PLOT_DPI)
 
   best_params <- list(
-    mtry          = tune_res$best$mtry,
-    min_nodesize  = tune_res$best$min_nodesize
+    ntree        = tune_res$best$ntree,
+    mtry         = tune_res$best$mtry,
+    min_nodesize = tune_res$best$min_nodesize
   )
 
   # ── Step 4: Cross-validation ──────────────────────────────────────────────
@@ -222,28 +225,28 @@ for (prep_name in names(spec_list)) {
     X             = X_prep,
     y             = y_model,
     best_params   = best_params,
-    num_trees     = NUM_TREES_FINAL,
     folds         = folds,
     n_cores       = N_CORES,
     seed          = SEED,
     back_trans_fn = back_trans_fn
   )
 
-  # Per-fold metrics
-  fold_summ <- metrics_summary(cv_res$fold_metrics)
-  cat(sprintf("\nCV Summary [%s]:\n", prep_name))
-  print_metrics(fold_summ)
+  # Per-resample metrics (30 resamples = 10 folds × 3 repeats)
+  resamp_summ <- metrics_summary(cv_res$resample_metrics)
+  cat(sprintf("\nCV Summary (%d resamples) [%s]:\n",
+              length(cv_res$resample_metrics), prep_name))
+  print_metrics(resamp_summ)
 
   # Aggregate for comparison across methods
   row_summ <- data.frame(
     preprocessing = prep_name,
-    t(setNames(fold_summ$mean, fold_summ$metric)),
+    t(setNames(resamp_summ$mean, resamp_summ$metric)),
     stringsAsFactors = FALSE
   )
   # Add SD columns for error bars in plots
-  for (m in fold_summ$metric) {
+  for (m in resamp_summ$metric) {
     row_summ[[paste0(m, "_sd")]] <-
-      fold_summ$sd[fold_summ$metric == m]
+      resamp_summ$sd[resamp_summ$metric == m]
   }
   all_cv_metrics <- dplyr::bind_rows(all_cv_metrics, row_summ)
 
@@ -276,7 +279,6 @@ for (prep_name in names(spec_list)) {
     X           = X_prep,
     y           = y_model,
     best_params = best_params,
-    num_trees   = NUM_TREES_FINAL,
     n_cores     = N_CORES,
     seed        = SEED
   )
@@ -286,9 +288,9 @@ for (prep_name in names(spec_list)) {
 
   # Save results
   all_results[[prep_name]] <- list(
-    tune       = tune_res,
-    cv         = cv_res,
-    fold_summ  = fold_summ,
+    tune        = tune_res,
+    cv          = cv_res,
+    resamp_summ = resamp_summ,
     final_model = final_model
   )
 
@@ -302,7 +304,7 @@ for (prep_name in names(spec_list)) {
 
 # ── 6. Cross-method comparison ───────────────────────────────────────────────
 cat("\n── Step 6: Cross-method performance comparison ─────\n\n")
-print(all_cv_metrics[, c("preprocessing", "r2", "rmse", "rpd", "rpiq")],
+print(all_cv_metrics[, c("preprocessing", "r2", "rmse", "mae", "me", "ccc", "rpd", "rpiq")],
       row.names = FALSE, digits = 4)
 
 # Write full metrics to CSV
