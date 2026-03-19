@@ -4,16 +4,44 @@
 # Pipeline:
 #   0. Setup & configuration
 #   1. Data download / load from OSSL (ASD VisNIR sensor, random fraction)
-#   2. Spectral preprocessing (SG smooth, SG 1st deriv., SNV, absorbance)
+#   2. Spectral preprocessing (SG smooth, SG 1st deriv., SNV)
 #   3. Hyperparameter tuning  (grid search, OOB-based, parallelised)
 #   4. k-fold cross-validation (parallelised)
 #   5. Final model fit on full data
 #   6. Results export (metrics CSV, model .rds, figures)
 #
-# Authors : [Your Name]
+# Author  : Hugo Machado Rodrigues
+#           University of Florida — BMP Project
+#           ORCID    : https://orcid.org/0000-0002-8070-8126
+#           GitHub   : https://github.com/HugoMachadoRodrigues
+#           ResearchGate: https://www.researchgate.net/profile/Hugo-Rodrigues-12
+#           X/Twitter: https://x.com/Hugo_MRodrigues
+#           LinkedIn : https://www.linkedin.com/in/hugo-rodrigues-52b535119/
+#
 # Inspired by: Clingensmith, C. & Grunwald, S. — NRCS Soil Spectral Modeling
-# Date    : 2024
+# Date    : 2026
 # =============================================================================
+
+# ── Auto working directory ─────────────────────────────────────────────────────
+# Automatically sets the working directory to the folder containing this script.
+# Works whether you source() the file or run it from the RStudio editor.
+local({
+  src <- tryCatch(
+    normalizePath(sys.frame(1)$ofile, mustWork = FALSE),
+    error = function(e) ""
+  )
+  if (!nzchar(src) && requireNamespace("rstudioapi", quietly = TRUE) &&
+      rstudioapi::isAvailable()) {
+    src <- rstudioapi::getActiveDocumentContext()$path
+  }
+  if (nzchar(src)) {
+    d <- dirname(src)
+    if (!identical(normalizePath(d), normalizePath(getwd()))) {
+      setwd(d)
+      message("Working directory set to: ", d)
+    }
+  }
+})
 
 # ── 0. Setup ──────────────────────────────────────────────────────────────────
 cat("\n══════════════════════════════════════════════════\n")
@@ -39,8 +67,7 @@ suppressPackageStartupMessages({
   library(httr)
 })
 
-# Source utility modules — paths are relative to the working directory.
-# Run setwd("/path/to/soil-rf-spectral") before sourcing this script.
+# Source utility modules (paths relative to this script's directory)
 source("R/config.R")
 source("R/utils_preprocessing.R")
 source("R/utils_metrics.R")
@@ -106,7 +133,15 @@ spec_df <- visnir_raw %>%
   dplyr::select(id.layer_uuid_txt, all_of(keep_cols)) %>%
   tidyr::drop_na()
 
-cat(sprintf("  Complete spectral observations: %d\n", nrow(spec_df)))
+n_rows <- nrow(spec_df)
+n_uuid <- dplyr::n_distinct(spec_df$id.layer_uuid_txt)
+if (n_uuid < n_rows) {
+  cat(sprintf("  Complete spectral observations: %d (%d unique layers; %.1f scans/layer avg)\n",
+              n_rows, n_uuid, n_rows / n_uuid))
+  cat("  Replicate scans retained — CV folds are assigned by layer UUID to prevent leakage.\n")
+} else {
+  cat(sprintf("  Complete spectral observations: %d (1 scan per layer)\n", n_rows))
+}
 
 # ── Join with lab data ────────────────────────────────────────────────────────
 if (!TARGET_PROPERTY %in% names(soillab)) {
@@ -124,40 +159,33 @@ lab_sub <- soillab %>%
 joined <- dplyr::inner_join(spec_df, lab_sub, by = "id.layer_uuid_txt")
 cat(sprintf("  Observations after joining with lab data: %d\n", nrow(joined)))
 
-# ── Random fraction ───────────────────────────────────────────────────────────
+# ── Random fraction + hard cap ────────────────────────────────────────────────
 set.seed(SEED)
 sampled <- dplyr::slice_sample(joined, prop = OSSL_FRACTION)
-cat(sprintf("  Sampled fraction (%.0f%%): %d observations\n",
-            OSSL_FRACTION * 100, nrow(sampled)))
+if (!is.null(N_MAX_SAMPLES) && is.finite(N_MAX_SAMPLES) &&
+    nrow(sampled) > N_MAX_SAMPLES) {
+  sampled <- dplyr::slice_sample(sampled, n = N_MAX_SAMPLES)
+  cat(sprintf("  Sampled fraction (%.0f%%) capped at %d observations\n",
+              OSSL_FRACTION * 100, nrow(sampled)))
+} else {
+  cat(sprintf("  Sampled fraction (%.0f%%): %d observations\n",
+              OSSL_FRACTION * 100, nrow(sampled)))
+}
 
 # ── Matrices ──────────────────────────────────────────────────────────────────
-X_raw <- as.matrix(sampled[, keep_cols])
+X_raw   <- as.matrix(sampled[, keep_cols])
 colnames(X_raw) <- paste0("w", wave_nm)
 
-y_orig <- sampled[[TARGET_PROPERTY]]
+y_orig  <- sampled[[TARGET_PROPERTY]]
+uuid_id <- sampled$id.layer_uuid_txt   # group key for leakage-free CV folds
 
 # Summary statistics of target
 cat("\nTarget property summary:\n")
 print(summary_stats(y_orig))
 
-# ── Target transformation ─────────────────────────────────────────────────────
-if (USE_LOG_TARGET) {
-  # Shift to ensure positivity before log: log1p handles zeros
-  y_shift <- min(y_orig, na.rm = TRUE)
-  if (y_shift <= 0) y_shift <- 0  # log1p(0) = 0 is fine
-  y_model       <- log1p(y_orig)
-  back_trans_fn <- function(x) expm1(x)
-  cat(sprintf("\nTarget log-transformed: log1p(%s)\n", TARGET_PROPERTY))
-} else {
-  y_model       <- y_orig
-  back_trans_fn <- NULL
-  cat(sprintf("\nNo log transformation applied to target.\n"))
-}
-
 # ── 2. Preprocessing ──────────────────────────────────────────────────────────
+# Preprocessing of X is independent of y transformation — built once.
 # Pipeline: raw reflectance → SG smooth → {sg_smooth, sg_deriv1, snv}
-# SG smooth is applied once as the shared base; sg_deriv1 and snv are derived
-# from the smoothed spectra, not from raw reflectance.
 cat("\n── Step 2: Spectral preprocessing ────────────────\n")
 cat(sprintf("  SG parameters: window = %d | poly order = %d\n", SG_WINDOW, SG_POLY))
 
@@ -171,176 +199,217 @@ for (nm in names(spec_list)) {
   cat(sprintf("  %-15s → %d × %d\n", nm, nrow(spec_list[[nm]]), ncol(spec_list[[nm]])))
 }
 
-# ── CV folds (shared across preprocessing methods for fair comparison) ────────
-folds <- make_folds(y_model, k = CV_FOLDS, repeats = CV_REPEATS,
-                    stratified = CV_STRATIFIED, seed = SEED)
+# ── 3-6. Per-log-mode × per-preprocessing RF pipeline ────────────────────────
+all_log_results <- list()
 
-# ── 3-5. Per-preprocessing RF pipeline ───────────────────────────────────────
-all_results   <- list()
-all_cv_metrics <- data.frame()
+for (log_mode in LOG_MODES) {
 
-for (prep_name in names(spec_list)) {
+  use_log  <- identical(log_mode, "log")
+  mode_tag <- if (use_log) "log" else "raw"
 
-  cat(sprintf("\n══ Preprocessing: %s ══\n", toupper(prep_name)))
-  X_prep <- spec_list[[prep_name]]
+  cat(sprintf(
+    "\n╔══════════════════════════════════════════════════╗\n  Log mode : %s\n╚══════════════════════════════════════════════════╝\n\n",
+    if (use_log) "log1p(y)  — back-transformed for all metrics"
+    else         "original scale (no transformation)"
+  ))
 
-  # Remove any columns with zero variance (can occur with derivatives)
-  col_var <- apply(X_prep, 2, var, na.rm = TRUE)
-  X_prep  <- X_prep[, col_var > 1e-12, drop = FALSE]
-  cat(sprintf("  Predictors after zero-var filter: %d\n", ncol(X_prep)))
-
-  # ── Step 3: Tuning ──────────────────────────────────────────────────────────
-  cat("\n[3] Hyperparameter Tuning\n")
-  tune_res <- tune_rf(
-    X                = X_prep,
-    y                = y_model,
-    ntree_candidates = NTREE_CANDIDATES,
-    mtry_fracs       = MTRY_FRACS,
-    nodesize_vals    = NODESIZE_CANDIDATES,
-    n_cores          = N_CORES,
-    seed             = SEED
-  )
-
-  cat(sprintf("\nntree convergence — selected: %d\n", tune_res$ntree_sel))
-  cat("\nStage 2 grid (ordered by OOB RMSE):\n")
-  print(tune_res$stage2[, c("ntree","mtry","min_nodesize","oob_rmse","oob_r2")],
-        row.names = FALSE, digits = 5)
-  cat(sprintf("\nBest: ntree = %d | mtry = %d | min.node.size = %d | OOB RMSE = %.5f | OOB R² = %.4f\n\n",
-              tune_res$best$ntree, tune_res$best$mtry, tune_res$best$min_nodesize,
-              tune_res$best$oob_rmse, tune_res$best$oob_r2))
-
-  # Save tuning grid plot
-  p_tune <- plot_tuning_grid(tune_res$stage2,
-                              title = sprintf("Tuning Grid — %s [%s]",
-                                             TARGET_LABEL, prep_name))
-  save_plot(p_tune,
-            filename = sprintf("tuning_%s_%s", TARGET_PROPERTY, prep_name),
-            dir      = file.path(OUTPUT_DIR, "figures"),
-            devices  = PLOT_DEVICES, dpi = PLOT_DPI)
-
-  best_params <- list(
-    ntree        = tune_res$best$ntree,
-    mtry         = tune_res$best$mtry,
-    min_nodesize = tune_res$best$min_nodesize
-  )
-
-  # ── Step 4: Cross-validation ──────────────────────────────────────────────
-  cat("[4] Cross-Validation\n")
-  cv_res <- cv_rf(
-    X             = X_prep,
-    y             = y_model,
-    best_params   = best_params,
-    folds         = folds,
-    n_cores       = N_CORES,
-    seed          = SEED,
-    back_trans_fn = back_trans_fn
-  )
-
-  # Per-resample metrics (30 resamples = 10 folds × 3 repeats)
-  resamp_summ <- metrics_summary(cv_res$resample_metrics)
-  cat(sprintf("\nCV Summary (%d resamples) [%s]:\n",
-              length(cv_res$resample_metrics), prep_name))
-  print_metrics(resamp_summ)
-
-  # Aggregate for comparison across methods
-  row_summ <- data.frame(
-    preprocessing = prep_name,
-    t(setNames(resamp_summ$mean, resamp_summ$metric)),
-    stringsAsFactors = FALSE
-  )
-  # Add SD columns for error bars in plots
-  for (m in resamp_summ$metric) {
-    row_summ[[paste0(m, "_sd")]] <-
-      resamp_summ$sd[resamp_summ$metric == m]
+  if (use_log) {
+    y_model       <- log1p(y_orig)
+    back_trans_fn <- expm1
+  } else {
+    y_model       <- y_orig
+    back_trans_fn <- NULL
   }
-  all_cv_metrics <- dplyr::bind_rows(all_cv_metrics, row_summ)
 
-  # Obs vs Pred scatter
-  p_op <- plot_obs_pred(
-    cv_res$obs_pred,
-    title = sprintf("Obs vs Pred — %s [%s]", TARGET_LABEL, prep_name),
-    label = TARGET_LABEL
-  )
-  save_plot(p_op,
-            filename = sprintf("obs_pred_%s_%s", TARGET_PROPERTY, prep_name),
-            dir      = file.path(OUTPUT_DIR, "figures"),
-            devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+  # Folds are assigned by layer UUID so replicate scans of the same soil layer
+  # always fall in the same fold — prevents leakage when n_uuid < n_rows.
+  folds <- make_folds(y_model, k = CV_FOLDS, repeats = CV_REPEATS,
+                      stratified = CV_STRATIFIED, seed = SEED,
+                      groups = uuid_id)
 
-  # Variable importance
-  imp_wl  <- as.numeric(gsub("w", "", names(cv_res$avg_importance)))
-  p_imp <- plot_importance(
-    importance  = cv_res$avg_importance,
-    wavelengths = imp_wl,
-    title = sprintf("Variable Importance — %s [%s]", TARGET_LABEL, prep_name)
-  )
-  save_plot(p_imp,
-            filename = sprintf("importance_%s_%s", TARGET_PROPERTY, prep_name),
-            dir      = file.path(OUTPUT_DIR, "figures"),
-            devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+  all_results    <- list()
+  all_cv_metrics <- data.frame()
 
-  # ── Step 5: Final model on full data ─────────────────────────────────────
-  cat("[5] Final Model (full dataset)\n")
-  final_model <- fit_final_rf(
-    X           = X_prep,
-    y           = y_model,
-    best_params = best_params,
-    n_cores     = N_CORES,
-    seed        = SEED
-  )
+  for (prep_name in names(spec_list)) {
 
-  cat(sprintf("  OOB R²: %.4f | OOB RMSE: %.5f\n\n",
-              final_model$r.squared, sqrt(final_model$prediction.error)))
+    cat(sprintf("\n══ [%s] Preprocessing: %s ══\n", toupper(mode_tag), toupper(prep_name)))
+    X_prep <- spec_list[[prep_name]]
 
-  # Save results
-  all_results[[prep_name]] <- list(
-    tune        = tune_res,
-    cv          = cv_res,
-    resamp_summ = resamp_summ,
-    final_model = final_model
-  )
+    # Remove any columns with zero variance (can occur with derivatives)
+    col_var <- apply(X_prep, 2, var, na.rm = TRUE)
+    X_prep  <- X_prep[, col_var > 1e-12, drop = FALSE]
+    cat(sprintf("  Predictors after zero-var filter: %d\n", ncol(X_prep)))
 
-  if (SAVE_MODELS) {
-    saveRDS(final_model,
-            file.path(OUTPUT_DIR, "models",
-                      sprintf("rf_final_%s_%s.rds",
-                              TARGET_PROPERTY, prep_name)))
+    # ── Step 3: Tuning ────────────────────────────────────────────────────────
+    cat("\n[3] Hyperparameter Tuning\n")
+    tune_res <- tune_rf(
+      X                = X_prep,
+      y                = y_model,
+      ntree_candidates = NTREE_CANDIDATES,
+      mtry_fracs       = MTRY_FRACS,
+      nodesize_vals    = NODESIZE_CANDIDATES,
+      n_cores          = N_CORES,
+      seed             = SEED
+    )
+
+    cat(sprintf("\nFull 3D grid: %d combinations evaluated\n", nrow(tune_res$grid)))
+    cat("Top 10 combinations (ordered by OOB RMSE):\n")
+    print(head(tune_res$grid[, c("ntree","mtry","min_nodesize","oob_rmse","oob_r2")], 10),
+          row.names = FALSE, digits = 2)
+    cat(sprintf("\nBest: ntree = %d | mtry = %d | min.node.size = %d | OOB RMSE = %.2f | OOB R² = %.2f\n\n",
+                tune_res$best$ntree, tune_res$best$mtry, tune_res$best$min_nodesize,
+                tune_res$best$oob_rmse, tune_res$best$oob_r2))
+
+    p_tune <- plot_tuning_grid(
+      tune_res$grid,
+      title = sprintf("Tuning Grid — %s [%s | %s]", TARGET_LABEL, prep_name, mode_tag)
+    )
+    save_plot(p_tune,
+              filename = sprintf("tuning_%s_%s_%s", TARGET_PROPERTY, mode_tag, prep_name),
+              dir      = file.path(OUTPUT_DIR, "figures"),
+              devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+
+    best_params <- list(
+      ntree        = tune_res$best$ntree,
+      mtry         = tune_res$best$mtry,
+      min_nodesize = tune_res$best$min_nodesize
+    )
+
+    # ── Step 4: Cross-validation ──────────────────────────────────────────────
+    cat("[4] Cross-Validation\n")
+    cv_res <- cv_rf(
+      X             = X_prep,
+      y             = y_model,
+      best_params   = best_params,
+      folds         = folds,
+      n_cores       = N_CORES,
+      seed          = SEED,
+      back_trans_fn = back_trans_fn
+    )
+
+    resamp_summ <- metrics_summary(cv_res$resample_metrics)
+    cat(sprintf("\nCV Summary (%d resamples) [%s | %s]:\n",
+                length(cv_res$resample_metrics), prep_name, mode_tag))
+    print_metrics(resamp_summ)
+
+    row_summ <- data.frame(
+      preprocessing = prep_name,
+      t(setNames(resamp_summ$mean, resamp_summ$metric)),
+      stringsAsFactors = FALSE
+    )
+    for (m in resamp_summ$metric) {
+      row_summ[[paste0(m, "_sd")]] <- resamp_summ$sd[resamp_summ$metric == m]
+    }
+    all_cv_metrics <- dplyr::bind_rows(all_cv_metrics, row_summ)
+
+    p_op <- plot_obs_pred(
+      cv_res$obs_pred,
+      title = sprintf("Obs vs Pred — %s [%s | %s]", TARGET_LABEL, prep_name, mode_tag),
+      label = TARGET_LABEL
+    )
+    save_plot(p_op,
+              filename = sprintf("obs_pred_%s_%s_%s", TARGET_PROPERTY, mode_tag, prep_name),
+              dir      = file.path(OUTPUT_DIR, "figures"),
+              devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+
+    imp_wl <- as.numeric(gsub("w", "", names(cv_res$avg_importance)))
+    p_imp  <- plot_importance(
+      importance  = cv_res$avg_importance,
+      wavelengths = imp_wl,
+      title = sprintf("Variable Importance — %s [%s | %s]", TARGET_LABEL, prep_name, mode_tag)
+    )
+    save_plot(p_imp,
+              filename = sprintf("importance_%s_%s_%s", TARGET_PROPERTY, mode_tag, prep_name),
+              dir      = file.path(OUTPUT_DIR, "figures"),
+              devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+
+    # ── Step 5: Final model on full data ──────────────────────────────────────
+    cat("[5] Final Model (full dataset)\n")
+    final_model <- fit_final_rf(
+      X           = X_prep,
+      y           = y_model,
+      best_params = best_params,
+      n_cores     = N_CORES,
+      seed        = SEED
+    )
+
+    cat(sprintf("  OOB R²: %.2f | OOB RMSE: %.2f\n\n",
+                final_model$r.squared, sqrt(final_model$prediction.error)))
+
+    all_results[[prep_name]] <- list(
+      tune        = tune_res,
+      cv          = cv_res,
+      resamp_summ = resamp_summ,
+      final_model = final_model
+    )
+
+    if (SAVE_MODELS) {
+      saveRDS(final_model,
+              file.path(OUTPUT_DIR, "models",
+                        sprintf("rf_final_%s_%s_%s.rds",
+                                TARGET_PROPERTY, mode_tag, prep_name)))
+    }
   }
+
+  # ── Step 6: Cross-preprocessing comparison (within this log mode) ──────────
+  cat(sprintf("\n── Step 6: Preprocessing comparison [%s] ─────\n\n", mode_tag))
+  tmp <- all_cv_metrics[, c("preprocessing", "r2", "rmse", "mae", "me", "ccc", "rpd", "rpiq")]
+  tmp[, -1] <- lapply(tmp[, -1], round, 2)
+  print(tmp, row.names = FALSE)
+
+  metrics_file <- file.path(OUTPUT_DIR, "metrics",
+                             sprintf("cv_metrics_%s_%s.csv", TARGET_PROPERTY, mode_tag))
+  readr::write_csv(all_cv_metrics, metrics_file)
+  cat(sprintf("\nMetrics saved: %s\n", metrics_file))
+
+  if ("rpd_sd" %in% names(all_cv_metrics)) {
+    p_comp_rpd <- plot_cv_comparison(
+      all_cv_metrics, metric = "rpd",
+      title = sprintf("CV — RPD by Preprocessing [%s | %s]", TARGET_LABEL, mode_tag)
+    )
+    save_plot(p_comp_rpd,
+              filename = sprintf("comparison_rpd_%s_%s", TARGET_PROPERTY, mode_tag),
+              dir      = file.path(OUTPUT_DIR, "figures"),
+              devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+
+    p_comp_r2 <- plot_cv_comparison(
+      all_cv_metrics, metric = "r2",
+      title = sprintf("CV — R² by Preprocessing [%s | %s]", TARGET_LABEL, mode_tag)
+    )
+    save_plot(p_comp_r2,
+              filename = sprintf("comparison_r2_%s_%s", TARGET_PROPERTY, mode_tag),
+              dir      = file.path(OUTPUT_DIR, "figures"),
+              devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+  }
+
+  saveRDS(all_results,
+          file.path(OUTPUT_DIR, "models",
+                    sprintf("all_results_%s_%s.rds", TARGET_PROPERTY, mode_tag)))
+
+  all_log_results[[log_mode]] <- list(
+    cv_metrics = all_cv_metrics,
+    results    = all_results
+  )
 }
 
-# ── 6. Cross-method comparison ───────────────────────────────────────────────
-cat("\n── Step 6: Cross-method performance comparison ─────\n\n")
-print(all_cv_metrics[, c("preprocessing", "r2", "rmse", "mae", "me", "ccc", "rpd", "rpiq")],
-      row.names = FALSE, digits = 4)
+# ── Step 7: Log-mode comparison ───────────────────────────────────────────────
+if (length(LOG_MODES) > 1) {
+  cat("\n── Step 7: Log vs. No-Log comparison ─────────────\n\n")
 
-# Write full metrics to CSV
-metrics_file <- file.path(OUTPUT_DIR, "metrics",
-                           sprintf("cv_metrics_%s.csv", TARGET_PROPERTY))
-readr::write_csv(all_cv_metrics, metrics_file)
-cat(sprintf("\nMetrics saved: %s\n", metrics_file))
+  comp_rows <- lapply(names(all_log_results), function(lm) {
+    cm      <- all_log_results[[lm]]$cv_metrics
+    best_i  <- which.max(cm$r2)
+    best    <- cm[best_i, c("preprocessing", "r2", "rmse", "mae", "rpd", "rpiq", "ccc")]
+    best[, -1] <- lapply(best[, -1], round, 2)
+    cbind(log_mode = lm, best)
+  })
+  comp_df <- do.call(rbind, comp_rows)
+  print(comp_df, row.names = FALSE)
 
-# Comparison bar charts (RPD and R²)
-if ("rpd_sd" %in% names(all_cv_metrics)) {
-  p_comp_rpd <- plot_cv_comparison(all_cv_metrics, metric = "rpd",
-                                    title = sprintf("CV — RPD by Preprocessing [%s]",
-                                                   TARGET_LABEL))
-  save_plot(p_comp_rpd,
-            filename = sprintf("comparison_rpd_%s", TARGET_PROPERTY),
-            dir      = file.path(OUTPUT_DIR, "figures"),
-            devices  = PLOT_DEVICES, dpi = PLOT_DPI)
-
-  p_comp_r2 <- plot_cv_comparison(all_cv_metrics, metric = "r2",
-                                   title = sprintf("CV — R² by Preprocessing [%s]",
-                                                  TARGET_LABEL))
-  save_plot(p_comp_r2,
-            filename = sprintf("comparison_r2_%s", TARGET_PROPERTY),
-            dir      = file.path(OUTPUT_DIR, "figures"),
-            devices  = PLOT_DEVICES, dpi = PLOT_DPI)
+  readr::write_csv(comp_df,
+    file.path(OUTPUT_DIR, "metrics",
+              sprintf("log_comparison_%s.csv", TARGET_PROPERTY)))
 }
-
-# Save full results object
-saveRDS(all_results,
-        file.path(OUTPUT_DIR, "models",
-                  sprintf("all_results_%s.rds", TARGET_PROPERTY)))
 
 cat("\n══════════════════════════════════════════════════\n")
 cat("  Pipeline complete. Outputs in:", OUTPUT_DIR, "\n")

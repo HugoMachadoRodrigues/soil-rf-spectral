@@ -20,37 +20,75 @@ library(doParallel)
 
 # ── CV fold construction ──────────────────────────────────────────────────────
 
-#' Create (optionally stratified) k-fold × repeat CV indices.
+#' Create (optionally stratified, optionally grouped) k-fold × repeat CV indices.
+#'
+#' When \code{groups} is supplied, fold assignment is performed at the group
+#' level (e.g. layer UUID), so every row that belongs to the same group is
+#' always assigned to the same fold.  This prevents leakage when multiple
+#' spectral replicates share a single lab measurement.
 #'
 #' @param y          Numeric response vector.
 #' @param k          Number of folds (default 10).
 #' @param repeats    Number of repetitions (default 3).
-#' @param stratified Logical; stratify by quantile bins of y.
+#' @param stratified Logical; stratify by quantile bins of y (or group-mean y).
 #' @param seed       Integer seed for reproducibility.
+#' @param groups     Optional character/factor vector of group IDs (same length
+#'                   as y).  When provided, folds are assigned by group.
 #' @return List of length k×repeats. Each element is an integer vector of
 #'         *validation* row indices for that resample.
 make_folds <- function(y, k = 10, repeats = 3,
-                       stratified = TRUE, seed = 2024L) {
+                       stratified = TRUE, seed = 2024L,
+                       groups = NULL) {
   set.seed(seed)
   n     <- length(y)
   folds <- vector("list", k * repeats)
   idx   <- 0L
 
   for (r in seq_len(repeats)) {
-    if (stratified) {
-      bins <- cut(y,
-                  breaks = quantile(y, seq(0, 1, length.out = k + 1),
-                                    na.rm = TRUE),
-                  include.lowest = TRUE, labels = FALSE)
-      bins[is.na(bins)] <- 1L
-      fold_id <- integer(n)
-      for (b in unique(bins)) {
-        ii <- which(bins == b)
-        fold_id[ii] <- sample(rep_len(seq_len(k), length(ii)))
+
+    if (!is.null(groups)) {
+      # ── Grouped fold assignment ──────────────────────────────────────────
+      ugrp <- unique(as.character(groups))
+      ng   <- length(ugrp)
+
+      if (stratified) {
+        grp_y  <- as.numeric(
+          tapply(y, as.character(groups), mean, na.rm = TRUE)[ugrp]
+        )
+        bins   <- cut(grp_y,
+                      breaks = quantile(grp_y, seq(0, 1, length.out = k + 1),
+                                        na.rm = TRUE),
+                      include.lowest = TRUE, labels = FALSE)
+        bins[is.na(bins)] <- 1L
+        grp_fold <- integer(ng)
+        for (b in unique(bins)) {
+          ii <- which(bins == b)
+          grp_fold[ii] <- sample(rep_len(seq_len(k), length(ii)))
+        }
+      } else {
+        grp_fold <- sample(rep_len(seq_len(k), ng))
       }
+      names(grp_fold) <- ugrp
+      fold_id <- unname(grp_fold[as.character(groups)])
+
     } else {
-      fold_id <- sample(rep_len(seq_len(k), n))
+      # ── Row-level fold assignment ────────────────────────────────────────
+      if (stratified) {
+        bins <- cut(y,
+                    breaks = quantile(y, seq(0, 1, length.out = k + 1),
+                                      na.rm = TRUE),
+                    include.lowest = TRUE, labels = FALSE)
+        bins[is.na(bins)] <- 1L
+        fold_id <- integer(n)
+        for (b in unique(bins)) {
+          ii <- which(bins == b)
+          fold_id[ii] <- sample(rep_len(seq_len(k), length(ii)))
+        }
+      } else {
+        fold_id <- sample(rep_len(seq_len(k), n))
+      }
     }
+
     for (f in seq_len(k)) {
       idx          <- idx + 1L
       folds[[idx]] <- which(fold_id == f)
@@ -61,14 +99,20 @@ make_folds <- function(y, k = 10, repeats = 3,
 
 # ── Hyperparameter tuning ─────────────────────────────────────────────────────
 
-#' Two-stage grid search: (1) ntree convergence, (2) mtry × min.node.size.
+#' Full 3D grid search over ntree × mtry × min.node.size using OOB RMSE.
 #'
-#' Stage 1 evaluates ntree candidates (500–2000, step 100 per proposal) at
-#' default mtry. The smallest ntree whose OOB RMSE is within 0.1% of the
-#' minimum is selected as the operating ntree for Stage 2.
+#' All combinations are evaluated in a single parallel sweep — no sequential
+#' staging, no assumption of independence between parameters.
 #'
-#' Stage 2 evaluates all mtry × min.node.size combinations at the chosen
-#' ntree. OOB RMSE is the selection criterion throughout.
+#'   ntree candidates : seq(500, 2000, by = 100)  → 16 values  (configurable)
+#'   mtry fracs       : 1/9, 1/6, 1/3, 1          → 4 values   (configurable)
+#'   min.node.size    : 3, 5, 10                   → 3 values   (configurable)
+#'   ──────────────────────────────────────────────────────────
+#'   Total combinations (default): 16 × 4 × 3 = 192
+#'
+#' Each combination trains one ranger model (OOB only, importance = "none")
+#' and records OOB RMSE and R². All combinations run in parallel via foreach.
+#' The combination with the lowest OOB RMSE is selected.
 #'
 #' @param X               Numeric matrix of predictors (n × p).
 #' @param y               Numeric response vector (length n).
@@ -78,76 +122,47 @@ make_folds <- function(y, k = 10, repeats = 3,
 #' @param n_cores         Number of parallel workers (NULL = auto).
 #' @param seed            Random seed.
 #' @return List:
-#'   $stage1      — data frame of ntree vs. OOB RMSE
-#'   $ntree_sel   — selected ntree
-#'   $stage2      — data frame of full grid ordered by OOB RMSE
-#'   $best        — single-row data frame with best hyperparameters
+#'   $grid      — full grid data frame ordered by OOB RMSE (ascending)
+#'   $ntree_sel — ntree of the best combination
+#'   $best      — single-row data frame with the best hyperparameters
 tune_rf <- function(X, y,
                     ntree_candidates = seq(500, 2000, by = 100),
                     mtry_fracs       = c(1/9, 1/6, 1/3, 1),
                     nodesize_vals    = c(3, 5, 10),
                     n_cores          = NULL,
-                    seed             = 2024L) {
+                    seed             = 2026L) {
 
   p <- ncol(X)
   if (is.null(n_cores)) n_cores <- max(1L, parallel::detectCores() - 1L)
+
+  # Translate mtry fractions → actual integer values (at least 1)
+  mtry_vals <- pmax(1L, unique(round(mtry_fracs * p)))
+
+  # Full 3D grid
+  grid <- expand.grid(
+    ntree        = ntree_candidates,
+    mtry         = mtry_vals,
+    min_nodesize = nodesize_vals,
+    stringsAsFactors = FALSE
+  )
+  n_comb <- nrow(grid)
+
+  message(sprintf(
+    "[Tuning] Full 3D grid — %d ntree × %d mtry × %d nodesize = %d combinations | Cores: %d",
+    length(ntree_candidates), length(mtry_vals), length(nodesize_vals),
+    n_comb, n_cores
+  ))
+
+  df_all <- as.data.frame(X)
+  df_all[[".y"]] <- y
 
   cl <- parallel::makeCluster(n_cores)
   doParallel::registerDoParallel(cl)
   on.exit({ parallel::stopCluster(cl); doParallel::stopImplicitCluster() },
           add = TRUE)
 
-  df_all <- as.data.frame(X)
-  df_all[[".y"]] <- y
-
-  # ── Stage 1: ntree convergence ─────────────────────────────────────────────
-  message(sprintf(
-    "[Tuning | Stage 1] ntree convergence — %d candidates | Cores: %d",
-    length(ntree_candidates), n_cores
-  ))
-
-  s1 <- foreach::foreach(
-    nt        = ntree_candidates,
-    .packages = "ranger",
-    .combine  = rbind
-  ) %dopar% {
-    set.seed(seed)
-    fit <- ranger::ranger(
-      formula       = .y ~ .,
-      data          = df_all,
-      num.trees     = nt,
-      importance    = "none",
-      verbose       = FALSE
-    )
-    c(ntree    = nt,
-      oob_rmse = sqrt(fit$prediction.error),
-      oob_r2   = fit$r.squared)
-  }
-  s1 <- as.data.frame(s1)
-
-  # Select smallest ntree within 0.1% of minimum OOB RMSE
-  min_rmse  <- min(s1$oob_rmse, na.rm = TRUE)
-  ntree_sel <- min(s1$ntree[s1$oob_rmse <= min_rmse * 1.001])
-  message(sprintf("  → Selected ntree = %d (OOB RMSE = %.6f)", ntree_sel, min_rmse))
-
-  # ── Stage 2: mtry × min.node.size grid ────────────────────────────────────
-  mtry_vals <- pmax(1L, unique(round(mtry_fracs * p)))
-  grid <- expand.grid(
-    ntree        = ntree_sel,
-    mtry         = mtry_vals,
-    min_nodesize = nodesize_vals,
-    oob_rmse     = NA_real_,
-    oob_r2       = NA_real_,
-    stringsAsFactors = FALSE
-  )
-
-  message(sprintf(
-    "[Tuning | Stage 2] mtry × min.node.size — %d combinations | ntree = %d",
-    nrow(grid), ntree_sel
-  ))
-
-  s2 <- foreach::foreach(
-    i         = seq_len(nrow(grid)),
+  results <- foreach::foreach(
+    i         = seq_len(n_comb),
     .packages = "ranger",
     .combine  = rbind
   ) %dopar% {
@@ -155,7 +170,7 @@ tune_rf <- function(X, y,
     fit <- ranger::ranger(
       formula       = .y ~ .,
       data          = df_all,
-      num.trees     = ntree_sel,
+      num.trees     = grid$ntree[i],
       mtry          = grid$mtry[i],
       min.node.size = grid$min_nodesize[i],
       importance    = "none",
@@ -165,15 +180,20 @@ tune_rf <- function(X, y,
       oob_r2   = fit$r.squared)
   }
 
-  grid$oob_rmse <- s2[, "oob_rmse"]
-  grid$oob_r2   <- s2[, "oob_r2"]
+  grid$oob_rmse <- results[, "oob_rmse"]
+  grid$oob_r2   <- results[, "oob_r2"]
   grid          <- grid[order(grid$oob_rmse), ]
+  best          <- grid[1L, ]
+
+  message(sprintf(
+    "  → Best: ntree = %d | mtry = %d | min.node.size = %d | OOB RMSE = %.4f | OOB R² = %.4f",
+    best$ntree, best$mtry, best$min_nodesize, best$oob_rmse, best$oob_r2
+  ))
 
   list(
-    stage1    = s1,
-    ntree_sel = ntree_sel,
-    stage2    = grid,
-    best      = grid[1, ]
+    grid      = grid,
+    ntree_sel = best$ntree,
+    best      = best
   )
 }
 

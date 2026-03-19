@@ -72,19 +72,51 @@ plot_importance <- function(importance, wavelengths = NULL, top_n = 20L,
   p
 }
 
-# ── Tuning grid heatmap ───────────────────────────────────────────────────────
-#' @param tune_grid  Data frame from tune_rf()$grid.
+# ── Tuning grid heatmap (full 3D: ntree × mtry × nodesize) ───────────────────
+#' Produces two panels:
+#'   Panel A — OOB RMSE vs ntree for the best mtry × nodesize combination.
+#'   Panel B — heatmap of mtry × nodesize, each cell showing the minimum OOB
+#'             RMSE across all ntree values, faceted by min.node.size.
+#'
+#' @param tune_grid  Data frame from tune_rf()$grid (columns: ntree, mtry,
+#'                   min_nodesize, oob_rmse, oob_r2).
+#' @param title      Overall plot title.
 plot_tuning_grid <- function(tune_grid, title = "Tuning Grid — OOB RMSE") {
-  ggplot(tune_grid,
-         aes(x = factor(mtry), y = factor(min_nodesize), fill = oob_rmse)) +
-    geom_tile(colour = "white", linewidth = 0.5) +
-    geom_text(aes(label = round(oob_rmse, 4)),
-              size = 3, colour = "white", fontface = "bold") +
-    scale_fill_viridis_c(option = "plasma", name = "OOB RMSE",
+
+  # ── Panel A: OOB RMSE vs ntree (best mtry × nodesize fixed) ───────────────
+  best_row   <- tune_grid[which.min(tune_grid$oob_rmse), ]
+  ntree_line <- tune_grid[
+    tune_grid$mtry         == best_row$mtry &
+    tune_grid$min_nodesize == best_row$min_nodesize, ]
+  ntree_line <- ntree_line[order(ntree_line$ntree), ]
+
+  pA <- ggplot(ntree_line, aes(x = ntree, y = oob_rmse)) +
+    geom_line(colour = "#2980B9", linewidth = 0.8) +
+    geom_point(colour = "#2980B9", size = 2) +
+    geom_point(data = ntree_line[which.min(ntree_line$oob_rmse), ],
+               colour = "#C0392B", size = 3.5, shape = 18) +
+    labs(title    = "A — ntree convergence (best mtry × nodesize)",
+         subtitle = sprintf("mtry = %d | min.node.size = %d",
+                            best_row$mtry, best_row$min_nodesize),
+         x = "ntree", y = "OOB RMSE") +
+    theme_spectral()
+
+  # ── Panel B: heatmap — min OOB RMSE per mtry × nodesize ───────────────────
+  agg <- aggregate(oob_rmse ~ mtry + min_nodesize, data = tune_grid, FUN = min)
+
+  pB <- ggplot(agg, aes(x = factor(mtry), y = factor(min_nodesize),
+                         fill = oob_rmse)) +
+    geom_tile(colour = "white", linewidth = 0.6) +
+    geom_text(aes(label = sprintf("%.4f", oob_rmse)),
+              size = 2.8, colour = "white", fontface = "bold") +
+    scale_fill_viridis_c(option = "plasma", name = "min OOB RMSE",
                          direction = -1) +
-    labs(title = title,
+    labs(title    = "B — mtry × min.node.size (min RMSE across ntree)",
          x = "mtry", y = "min.node.size") +
     theme_spectral()
+
+  ggpubr::ggarrange(pA, pB, ncol = 2, widths = c(1, 1.2)) |>
+    ggpubr::annotate_figure(top = ggpubr::text_grob(title, face = "bold", size = 13))
 }
 
 # ── CV metrics bar chart ──────────────────────────────────────────────────────

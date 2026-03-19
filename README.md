@@ -2,6 +2,23 @@
 
 > **A reproducible, parallelised pipeline for predicting soil properties from VisNIR spectroscopy (ASD FieldSpec 4, 350–2500 nm) using tuned Random Forests and multiple spectral preprocessing strategies.**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![R](https://img.shields.io/badge/R-%3E%3D4.1-276DC3?logo=r&logoColor=white)](https://www.r-project.org/)
+[![ranger](https://img.shields.io/badge/ranger-Random%20Forest-2E7D32)](https://github.com/imbs-hl/ranger)
+[![OSSL](https://img.shields.io/badge/Data-OSSL%20v1.2-8B4513)](https://soilspectroscopy.org)
+
+---
+
+## Author
+
+**Hugo Machado Rodrigues** — University of Florida, BMP Project
+
+[![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
+[![GitHub](https://img.shields.io/badge/GitHub-HugoMachadoRodrigues-181717?logo=github&logoColor=white)](https://github.com/HugoMachadoRodrigues)
+[![ResearchGate](https://img.shields.io/badge/ResearchGate-Hugo--Rodrigues-00CCBB?logo=researchgate&logoColor=white)](https://www.researchgate.net/profile/Hugo-Rodrigues-12)
+[![X](https://img.shields.io/badge/X-Hugo__MRodrigues-000000?logo=x&logoColor=white)](https://x.com/Hugo_MRodrigues)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Hugo%20Rodrigues-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/hugo-rodrigues-52b535119/)
+
 ---
 
 ## Project Context
@@ -69,16 +86,13 @@ OSSL VisNIR / ASD (350–2500 nm)
           └──► SNV ──────────────────────────► Treatment 3: snv
                                                            │ (each treatment evaluated)
                                                            ▼
-                                          Stage 1: ntree convergence
-                                          (500–2000, step 100, OOB RMSE)
-                                                           │
-                                                           ▼
-                                          Stage 2: mtry × min.node.size grid
-                                          (fracs: 1/9, 1/6, 1/3, 1 of p)
+                                   Full 3D grid search (OOB RMSE, parallel)
+                                   ntree × mtry × min.node.size
+                                   16 × 4 × 3 = 192 combinations
                                                            │
                                                            ▼
                                    10-fold × 3-repeat stratified CV
-                                   (30 resamples; parallel execution)
+                                   (30 resamples; grouped by layer UUID)
                                                            │
                                                            ▼
                                    Final model (full dataset)
@@ -212,18 +226,20 @@ A well-calibrated model has SB ≈ 0, NU ≈ 0, with most error in LC.
 
 Tuning is performed entirely on the **training set using OOB error**, avoiding any information leakage from the validation folds.
 
-### Stage 1 — ntree convergence
+### Full 3D grid search
 
-ntree is evaluated from 500 to 2000 in steps of 100. The smallest ntree whose OOB RMSE is within 0.1% of the global minimum is selected as the operating value.
+All three hyperparameters are optimised jointly in a single parallel sweep — no sequential staging, no assumption that any parameter is independent of the others.
 
-### Stage 2 — mtry × min.node.size grid
+| Parameter | Candidates | Values |
+|---|---|---|
+| `num.trees` | 500 to 2000 in steps of 100 | 16 |
+| `mtry` | ⌊p/9⌋, ⌊p/6⌋, ⌊p/3⌋, p (fractions of total predictors p) | 4 |
+| `min.node.size` | 3, 5, 10 | 3 |
+| **Total combinations** | **16 × 4 × 3** | **192** |
 
-| Parameter | Candidates |
-|---|---|
-| `mtry` | ⌊p/9⌋, ⌊p/6⌋, ⌊p/3⌋, p (fractions of total predictors p) |
-| `min.node.size` | 3, 5, 10 |
+Every combination trains one `ranger` model using only OOB predictions (importance disabled for speed). All 192 models run simultaneously across all available CPU cores via `foreach %dopar%`. The combination with the **lowest OOB RMSE** is selected for cross-validation and the final model.
 
-All combinations are evaluated in parallel. The combination with the lowest OOB RMSE is used for cross-validation and the final model.
+**Why not two stages?** A sequential design that fixes `ntree` first and then searches `mtry × min.node.size` assumes that the optimal `ntree` is independent of `mtry` and `min.node.size`. This assumption fails in practice: a lower `mtry` (more randomness per tree) typically requires more trees to converge. The full 3D grid eliminates this assumption entirely at a modest computational cost (~192 OOB models vs the 28 of the two-stage approach, but each model is fast with `importance = "none"`).
 
 ---
 
@@ -235,7 +251,7 @@ All combinations are evaluated in parallel. The combination with the lowest OOB 
 | Folds | 10 |
 | Repeats | 3 |
 | Total resamples | 30 |
-| Fold assignment | Stratified by quantile bins of the target |
+| Fold assignment | **Grouped by layer UUID** — all spectral replicates of the same soil layer always fall in the same fold, preventing leakage when multiple scans share a single lab measurement. Stratified by quantile bins of group-mean y. |
 | Execution | Parallel (all resamples simultaneously) |
 
 Performance is summarised as **mean ± SD** across all 30 resamples, providing uncertainty estimates for each metric.
@@ -331,10 +347,11 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 ## Citation
 
 ```bibtex
-@software{soil_rf_spectral_2024,
-  author  = {Rodrigues, Hugo M.},
+@software{soil_rf_spectral_2026,
+  author  = {Rodrigues, Hugo Machado},
   title   = {Soil Spectral Modeling with Random Forest — BMP Project},
-  year    = {2024},
+  year    = {2026},
+  orcid   = {0000-0002-8070-8126},
   url     = {https://github.com/HugoMachadoRodrigues/soil-rf-spectral}
 }
 ```
@@ -342,3 +359,4 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 ---
 
 *Built with R · ranger · OSSL — BMP Project, University of Florida*
+*© Hugo Machado Rodrigues · [ORCID](https://orcid.org/0000-0002-8070-8126) · [GitHub](https://github.com/HugoMachadoRodrigues)*

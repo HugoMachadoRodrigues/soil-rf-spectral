@@ -156,7 +156,7 @@ calc_metrics <- function(obs, pred,
     lc        = lc,
     rmse_c    = rmse_c,
     n         = n
-  ), 6)
+  ), 2)
 }
 
 # ── Aggregate fold metrics ─────────────────────────────────────────────────────
@@ -170,8 +170,8 @@ metrics_summary <- function(resample_metrics) {
   sds  <- apply(mat, 2, sd, na.rm = TRUE)
   data.frame(
     metric = names(mn),
-    mean   = round(mn,  5),
-    sd     = round(sds, 5),
+    mean   = round(mn,  2),
+    sd     = round(sds, 2),
     row.names = NULL
   )
 }
@@ -181,7 +181,7 @@ metrics_summary <- function(resample_metrics) {
 print_metrics <- function(df) {
   if (is.numeric(df)) df <- data.frame(metric = names(df), value = df)
   cat("\n", strrep("─", 56), "\n", sep = "")
-  print(df, row.names = FALSE, digits = 5)
+  print(df, row.names = FALSE, digits = 2)
   cat(strrep("─", 56), "\n\n", sep = "")
 }
 

@@ -26,9 +26,13 @@ TARGET_LABEL    <- "Soil Organic Carbon (%)"   # used in figures and outputs
 # BMP_TARGETS <- c("pH", "TP", "M3P", "WEP", "TC", "TN", "Fe", "Al", "Ca", "Mg")
 
 # ── Target transformation ─────────────────────────────────────────────────────
-# Apply log1p() to the target before modeling; expm1() back-transforms.
-# Recommended for right-skewed properties (OC, TN, TP, Fe, Al, etc.).
-USE_LOG_TARGET <- TRUE
+# Controls whether to model y on log1p scale, original scale, or both.
+# Allowed values (single or combined):
+#   "log"    — model log1p(y), back-transform predictions for all metrics
+#   "no_log" — model y on original scale
+#   c("log", "no_log") — run both and print a side-by-side comparison
+# Recommended: c("log", "no_log") for right-skewed properties (OC, TN, TP…)
+LOG_MODES <- c("log", "no_log")
 
 # ── Spectral preprocessing methods ───────────────────────────────────────────
 # Three treatments, all derived from a common SG-smooth base (see pipeline):
@@ -48,7 +52,10 @@ SG_POLY   <- 3    # polynomial order (< SG_WINDOW)
 # ── OSSL data (prototype) ─────────────────────────────────────────────────────
 # Fraction of OSSL observations to use for prototyping (0 < FRACTION ≤ 1).
 # Set to 1.0 when running with your own complete dataset.
-OSSL_FRACTION <- 0.20
+OSSL_FRACTION  <- 0.20
+# Hard cap on sample size after fraction sampling (set to Inf to disable).
+# Prototype default: 2000 samples are sufficient to evaluate the pipeline.
+N_MAX_SAMPLES  <- 2000
 # ASD FieldSpec 4 usable range (nm) — edges trimmed to reduce noise
 WAVE_MIN      <- 400
 WAVE_MAX      <- 2450
