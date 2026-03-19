@@ -24,7 +24,7 @@ cat("═════════════════════════
 pkg_required <- c(
   "here", "ranger", "prospectr", "foreach", "doParallel",
   "ggplot2", "ggpubr", "viridis", "moments", "httr",
-  "dplyr", "tidyr", "readr", "qs"
+  "dplyr", "tidyr", "readr", "qs2"
 )
 pkg_missing <- pkg_required[!sapply(pkg_required, requireNamespace, quietly = TRUE)]
 if (length(pkg_missing) > 0) {
@@ -37,7 +37,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)
   library(readr)
-  library(qs)
+  library(qs2)
   library(httr)
 })
 
@@ -84,8 +84,9 @@ download_if_missing(ossl_visnir_url,  ossl_visnir_local)
 download_if_missing(ossl_soillab_url, ossl_soillab_local)
 
 cat("Reading spectral data...\n")
-visnir_raw <- qs::qread(ossl_visnir_local)
-soillab    <- qs::qread(ossl_soillab_local)
+# qread_qs1() reads files written by the original qs package (OSSL v1.2 format)
+visnir_raw <- qs2::qread_qs1(ossl_visnir_local)
+soillab    <- qs2::qread_qs1(ossl_soillab_local)
 
 # ── Filter to ASD sensor ──────────────────────────────────────────────────────
 # ASD FieldSpec columns: scan_visnir.350_ref … scan_visnir.2500_ref (1-nm steps)
@@ -299,10 +300,10 @@ for (prep_name in names(spec_list)) {
   )
 
   if (SAVE_MODELS) {
-    qs::qsave(final_model,
-              file.path(OUTPUT_DIR, "models",
-                        sprintf("rf_final_%s_%s.qs",
-                                TARGET_PROPERTY, prep_name)))
+    saveRDS(final_model,
+            file.path(OUTPUT_DIR, "models",
+                      sprintf("rf_final_%s_%s.rds",
+                              TARGET_PROPERTY, prep_name)))
   }
 }
 
@@ -337,9 +338,9 @@ if ("rpd_sd" %in% names(all_cv_metrics)) {
 }
 
 # Save full results object
-qs::qsave(all_results,
-           file.path(OUTPUT_DIR, "models",
-                     sprintf("all_results_%s.qs", TARGET_PROPERTY)))
+saveRDS(all_results,
+        file.path(OUTPUT_DIR, "models",
+                  sprintf("all_results_%s.rds", TARGET_PROPERTY)))
 
 cat("\n══════════════════════════════════════════════════\n")
 cat("  Pipeline complete. Outputs in:", OUTPUT_DIR, "\n")

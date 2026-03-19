@@ -282,7 +282,7 @@ OSSL data files are downloaded automatically on first run and cached in `data/`.
 ```r
 install.packages(c(
   "ranger", "prospectr", "doParallel", "foreach",
-  "qs", "httr", "ggplot2", "ggpubr", "viridis",
+  "qs2", "httr", "ggplot2", "ggpubr", "viridis",
   "dplyr", "tidyr", "readr", "moments", "here"
 ), repos = "https://cloud.r-project.org")
 ```
@@ -292,7 +292,7 @@ install.packages(c(
 | `ranger` | Fast Random Forest (parallelised C++) |
 | `prospectr` | Savitzky–Golay smoothing/derivatives, SNV |
 | `doParallel` / `foreach` | Parallel tuning and CV loops |
-| `qs` | Fast serialisation of R objects and OSSL data |
+| `qs2` | Read OSSL data files (`.qs` legacy format via `qread_qs1()`); models saved as `.rds` |
 | `httr` | OSSL data download |
 | `ggplot2` / `ggpubr` / `viridis` | Publication-quality figures |
 | `dplyr` / `tidyr` / `readr` | Data wrangling |
