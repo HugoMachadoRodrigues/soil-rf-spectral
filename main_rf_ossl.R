@@ -22,7 +22,7 @@ cat("═════════════════════════
 
 # Install any missing packages from CRAN
 pkg_required <- c(
-  "here", "ranger", "prospectr", "foreach", "doParallel",
+  "ranger", "prospectr", "foreach", "doParallel",
   "ggplot2", "ggpubr", "viridis", "moments", "httr",
   "dplyr", "tidyr", "readr", "qs2"
 )
@@ -33,7 +33,6 @@ if (length(pkg_missing) > 0) {
 }
 
 suppressPackageStartupMessages({
-  library(here)
   library(dplyr)
   library(tidyr)
   library(readr)
@@ -41,12 +40,13 @@ suppressPackageStartupMessages({
   library(httr)
 })
 
-# Source utility modules
-source(here("R", "config.R"))
-source(here("R", "utils_preprocessing.R"))
-source(here("R", "utils_metrics.R"))
-source(here("R", "utils_rf.R"))
-source(here("R", "utils_visualization.R"))
+# Source utility modules — paths are relative to the working directory.
+# Run setwd("/path/to/soil-rf-spectral") before sourcing this script.
+source("R/config.R")
+source("R/utils_preprocessing.R")
+source("R/utils_metrics.R")
+source("R/utils_rf.R")
+source("R/utils_visualization.R")
 
 # Set parallel workers
 if (is.null(N_CORES)) N_CORES <- max(1L, parallel::detectCores() - 1L)

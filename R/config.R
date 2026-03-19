@@ -53,7 +53,7 @@ OSSL_FRACTION <- 0.20
 WAVE_MIN      <- 400
 WAVE_MAX      <- 2450
 # Local cache directory (OSSL files downloaded once and reused)
-DATA_DIR      <- here::here("data")
+DATA_DIR      <- "data"
 
 # ── Cross-validation ──────────────────────────────────────────────────────────
 # Per proposal: 10-fold CV with 3 repetitions.
@@ -82,7 +82,7 @@ NODESIZE_CANDIDATES <- c(3, 5, 10)
 N_CORES <- NULL
 
 # ── Output ────────────────────────────────────────────────────────────────────
-OUTPUT_DIR   <- here::here("output")
+OUTPUT_DIR   <- "output"
 SAVE_MODELS  <- TRUE          # save fitted ranger objects (.qs)
 PLOT_DEVICES <- c("png")      # "png", "pdf", or c("png", "pdf")
 PLOT_DPI     <- 300

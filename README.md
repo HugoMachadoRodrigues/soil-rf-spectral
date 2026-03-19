@@ -283,7 +283,7 @@ OSSL data files are downloaded automatically on first run and cached in `data/`.
 install.packages(c(
   "ranger", "prospectr", "doParallel", "foreach",
   "qs2", "httr", "ggplot2", "ggpubr", "viridis",
-  "dplyr", "tidyr", "readr", "moments", "here"
+  "dplyr", "tidyr", "readr", "moments"
 ), repos = "https://cloud.r-project.org")
 ```
 
@@ -297,7 +297,6 @@ install.packages(c(
 | `ggplot2` / `ggpubr` / `viridis` | Publication-quality figures |
 | `dplyr` / `tidyr` / `readr` | Data wrangling |
 | `moments` | Skewness / kurtosis for summary statistics |
-| `here` | Reproducible relative file paths |
 
 ---
 
