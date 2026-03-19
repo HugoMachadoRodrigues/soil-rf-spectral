@@ -20,16 +20,17 @@ cat("\n════════════════════════�
 cat("  Soil RF Spectral Modeling — OSSL / ASD Pipeline\n")
 cat("══════════════════════════════════════════════════\n\n")
 
-# Package management via pak (install if needed)
-if (!requireNamespace("pak", quietly = TRUE)) install.packages("pak")
+# Install any missing packages from CRAN
 pkg_required <- c(
   "here", "ranger", "prospectr", "foreach", "doParallel",
   "ggplot2", "ggpubr", "viridis", "moments", "httr",
   "dplyr", "tidyr", "readr", "qs"
 )
-pak::pkg_install(pkg_required[
-  !sapply(pkg_required, requireNamespace, quietly = TRUE)
-], ask = FALSE)
+pkg_missing <- pkg_required[!sapply(pkg_required, requireNamespace, quietly = TRUE)]
+if (length(pkg_missing) > 0) {
+  message("Installing missing packages: ", paste(pkg_missing, collapse = ", "))
+  install.packages(pkg_missing, repos = "https://cloud.r-project.org")
+}
 
 suppressPackageStartupMessages({
   library(here)

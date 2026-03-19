@@ -280,12 +280,11 @@ OSSL data files are downloaded automatically on first run and cached in `data/`.
 ## Dependencies
 
 ```r
-install.packages("pak")
-pak::pkg_install(c(
+install.packages(c(
   "ranger", "prospectr", "doParallel", "foreach",
   "qs", "httr", "ggplot2", "ggpubr", "viridis",
   "dplyr", "tidyr", "readr", "moments", "here"
-))
+), repos = "https://cloud.r-project.org")
 ```
 
 | Package | Purpose |
