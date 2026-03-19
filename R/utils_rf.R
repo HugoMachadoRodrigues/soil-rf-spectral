@@ -1,16 +1,48 @@
 # =============================================================================
 # utils_rf.R — Random Forest Tuning and Cross-Validation Utilities
 # =============================================================================
-# Implements the two-stage workflow specified in the BMP project proposal:
+# Implements the full modeling workflow for the BMP spectral project:
 #
-#   1. tune_rf()   — grid search over ntree × mtry × min.node.size using OOB
-#                    error. Fully parallelised with doParallel / foreach.
-#                    ntree range: 500–2000 (step 100)
-#                    mtry fracs:  1/9, 1/6, 1/3, 1  of total predictors
+#   1. make_folds() — grouped stratified k-fold × repeat CV index builder.
+#                     Fold assignment at the layer-UUID level prevents leakage
+#                     when multiple spectral replicates share one lab value
+#                     (Roberts et al. 2017).
 #
-#   2. cv_rf()     — 10-fold × 3-repeat stratified cross-validation with the
-#                    best hyperparameters. Resamples run in parallel.
-#                    Performance reported as mean ± SD across 30 resamples.
+#   2. tune_rf()    — full 3D grid search over ntree × mtry × min.node.size
+#                     using OOB RMSE (Probst et al. 2019; Liaw & Wiener 2002).
+#                     All 192 combinations run in parallel via doSNOW/foreach.
+#                     No parameter-independence assumption (unlike two-stage).
+#
+#   3. cv_rf()      — 10-fold × 3-repeat stratified cross-validation with the
+#                     tuned hyperparameters (Viscarra Rossel & Behrens 2010).
+#                     Performance reported as mean ± SD across 30 resamples.
+#
+#   4. fit_final_rf() — final ranger model fitted on the full dataset with
+#                       the best hyperparameters (Breiman 2001).
+#
+# Key references:
+#   Breiman (2001)           — original Random Forest algorithm:
+#     Breiman, L. Random forests. Machine Learning, 45(1), 5–32.
+#     https://doi.org/10.1023/A:1010933404324
+#
+#   Liaw & Wiener (2002)     — OOB-based hyperparameter selection:
+#     Liaw, A. & Wiener, M. Classification and regression by randomForest.
+#     R News, 2(3), 18–22. https://cran.r-project.org/doc/Rnews/
+#
+#   Probst et al. (2019)     — joint 3D tuning rationale:
+#     Probst, P., Wright, M.N., & Boulesteix, A.-L. Hyperparameters and
+#     tuning strategies for random forest. WIREs Data Mining and Knowledge
+#     Discovery, 9(3), e1301. https://doi.org/10.1002/widm.1301
+#
+#   Viscarra Rossel & Behrens (2010) — RF for soil VisNIR spectroscopy:
+#     Viscarra Rossel, R.A. & Behrens, T. Using data mining to model and
+#     interpret soil diffuse reflectance spectra. Geoderma, 158(1–2), 46–54.
+#     https://doi.org/10.1016/j.geoderma.2009.12.025
+#
+#   Roberts et al. (2017)    — grouped / spatially-aware CV:
+#     Roberts, D.R. et al. Cross-validation strategies for data with temporal,
+#     spatial, hierarchical, or phylogenetic structure. Ecography, 40(8),
+#     913–929. https://doi.org/10.1111/ecog.02881
 #
 # =============================================================================
 
@@ -63,7 +95,9 @@ fmt_time <- function(secs) {
 #' When \code{groups} is supplied, fold assignment is performed at the group
 #' level (e.g. layer UUID), so every row that belongs to the same group is
 #' always assigned to the same fold.  This prevents leakage when multiple
-#' spectral replicates share a single lab measurement.
+#' spectral replicates share a single lab measurement — the grouped CV design
+#' recommended by Roberts et al. (2017) for datasets with hierarchical or
+#' replicated structure.
 #'
 #' @param y          Numeric response vector.
 #' @param k          Number of folds (default 10).
@@ -140,7 +174,17 @@ make_folds <- function(y, k = 10, repeats = 3,
 #' Full 3D grid search over ntree × mtry × min.node.size using OOB RMSE.
 #'
 #' All combinations are evaluated in a single parallel sweep — no sequential
-#' staging, no assumption of independence between parameters.
+#' staging, no assumption of independence between parameters.  Probst et al.
+#' (2019) show that mtry and min.node.size interact: lower mtry (more
+#' diversity per tree) typically requires more trees to converge, so fixing
+#' ntree before tuning mtry (two-stage design) can miss the true optimum.
+#' The full 3D grid eliminates this assumption.
+#'
+#' OOB error is used as the tuning criterion following Liaw & Wiener (2002):
+#' each ranger model computes OOB predictions as a by-product of bootstrap
+#' sampling, providing an unbiased estimate without a separate validation set.
+#' importance = "none" is set for all tuning models to reduce computation
+#' (Viscarra Rossel & Behrens 2010 apply the same strategy).
 #'
 #'   ntree candidates : seq(500, 2000, by = 100)  → 16 values  (configurable)
 #'   mtry fracs       : 1/9, 1/6, 1/3, 1          → 4 values   (configurable)
@@ -150,7 +194,7 @@ make_folds <- function(y, k = 10, repeats = 3,
 #'
 #' Each combination trains one ranger model (OOB only, importance = "none")
 #' and records OOB RMSE and R². All combinations run in parallel via foreach.
-#' The combination with the lowest OOB RMSE is selected.
+#' The combination with the lowest OOB RMSE is selected (Breiman 2001).
 #'
 #' @param X               Numeric matrix of predictors (n × p).
 #' @param y               Numeric response vector (length n).

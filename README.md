@@ -105,15 +105,15 @@ OSSL VisNIR / ASD (350–2500 nm)
 
 ## Spectral Preprocessing
 
-SG smoothing is applied to raw reflectance first and serves as the common base for all three treatments. The other two treatments are derived from the smoothed spectra, not from raw reflectance.
+SG smoothing is applied to raw reflectance first and serves as the common base for all three treatments. The other two treatments are derived from the smoothed spectra, not from raw reflectance. This shared-base design (Rinnan et al. 2009) ensures that differences in model performance are attributable to the transformation step alone, not to differences in the underlying smoothing.
 
-| Treatment | Input | Transform | Removes / Linearises |
-|---|---|---|---|
-| `sg_smooth` | Raw reflectance | SG smooth (m = 0) | High-frequency instrument noise |
-| `sg_deriv1` | SG smooth | SG 1st derivative (m = 1) | Additive baseline offsets and slope effects |
-| `snv` | SG smooth | Standard Normal Variate | Multiplicative scatter and path-length variation |
+| Treatment | Input | Transform | Removes / Linearises | Key reference |
+|---|---|---|---|---|
+| `sg_smooth` | Raw reflectance | SG smooth (m = 0) | High-frequency instrument noise | Savitzky & Golay (1964) |
+| `sg_deriv1` | SG smooth | SG 1st derivative (m = 1) | Additive baseline offsets and slope effects | Rinnan et al. (2009) |
+| `snv` | SG smooth | Standard Normal Variate | Multiplicative scatter and path-length variation | Barnes et al. (1989) |
 
-SG parameters (`SG_WINDOW`, `SG_POLY`) apply uniformly across all treatments and are reported in model outputs. All preprocessing is applied identically within each cross-validation resample to prevent data leakage.
+SG parameters (`SG_WINDOW`, `SG_POLY`) apply uniformly across all treatments and are reported in model outputs. All preprocessing is applied identically within each cross-validation resample to prevent data leakage. Viscarra Rossel & Behrens (2010) demonstrated that SG derivatives and SNV consistently improve RF performance for soil VisNIR spectra relative to raw reflectance.
 
 ---
 
@@ -239,7 +239,9 @@ All three hyperparameters are optimised jointly in a single parallel sweep — n
 
 Every combination trains one `ranger` model using only OOB predictions (importance disabled for speed). All 192 models run simultaneously across all available CPU cores via `foreach %dopar%`. The combination with the **lowest OOB RMSE** is selected for cross-validation and the final model.
 
-**Why not two stages?** A sequential design that fixes `ntree` first and then searches `mtry × min.node.size` assumes that the optimal `ntree` is independent of `mtry` and `min.node.size`. This assumption fails in practice: a lower `mtry` (more randomness per tree) typically requires more trees to converge. The full 3D grid eliminates this assumption entirely at a modest computational cost (~192 OOB models vs the 28 of the two-stage approach, but each model is fast with `importance = "none"`).
+**Why OOB and not a separate validation set?** Each `ranger` model computes OOB predictions as a free by-product of bootstrap sampling (Breiman 2001; Liaw & Wiener 2002): trees are not evaluated on the ~37% of samples excluded from their bootstrap draw, providing an unbiased error estimate without requiring additional data splits. This is the standard tuning criterion for Random Forests (Probst et al. 2019).
+
+**Why a full 3D grid and not two stages?** A sequential design that fixes `ntree` first and then searches `mtry × min.node.size` assumes that the optimal `ntree` is independent of `mtry` and `min.node.size`. Probst et al. (2019) show this assumption fails in practice: lower `mtry` (more per-tree diversity) typically requires more trees to converge, so the optimal `ntree` shifts with `mtry`. The full 3D grid eliminates this assumption entirely at a modest computational cost (~192 OOB models vs 28 for a two-stage approach; each model is fast with `importance = "none"`).
 
 ---
 
@@ -251,7 +253,7 @@ Every combination trains one `ranger` model using only OOB predictions (importan
 | Folds | 10 |
 | Repeats | 3 |
 | Total resamples | 30 |
-| Fold assignment | **Grouped by layer UUID** — all spectral replicates of the same soil layer always fall in the same fold, preventing leakage when multiple scans share a single lab measurement. Stratified by quantile bins of group-mean y. |
+| Fold assignment | **Grouped by layer UUID** — all spectral replicates of the same soil layer always fall in the same fold, preventing leakage when multiple scans share a single lab measurement. Stratified by quantile bins of group-mean y. Grouped CV design following Roberts et al. (2017). |
 | Execution | Parallel (all resamples simultaneously) |
 
 Performance is summarised as **mean ± SD** across all 30 resamples, providing uncertainty estimates for each metric.
@@ -328,7 +330,7 @@ install.packages(c(
 
 **Open Soil Spectral Library (OSSL)**
 
-> Safanelli, J.L., Hengl, T., Parente, L., et al. (2023). Open Soil Spectral Library (OSSL): Building reproducible soil calibration models through open development and community engagement. *PLOS ONE*. https://doi.org/10.1371/journal.pone.0296545
+> Safanelli et al. (2023) — see References below.
 
 OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
@@ -336,10 +338,30 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 
 ## References
 
-- Bellon-Maurel, V., Fernandez-Ahumada, E., Palagos, B., Roger, J.-M., & McBratney, A. (2010). Critical review of chemometric indicators commonly used for assessing the quality of the prediction of soil attributes by NIR spectroscopy. *TrAC Trends in Analytical Chemistry*, 29(9), 1073–1081.
-- Chang, C.-W., Laird, D.A., Mausbach, M.J., & Hurburgh, C.R. (2001). Near-infrared reflectance spectroscopy–principal components regression analyses of soil properties. *Soil Science Society of America Journal*, 65(2), 480–490.
-- Gauch, H.G., Hwang, J.T.G., & Fick, G.W. (2003). Model evaluation by comparison of model-based predictions and measured values. *Agronomy Journal*, 95(6), 1442–1446.
-- Lin, L.I.-K. (1989). A concordance correlation coefficient to evaluate reproducibility. *Biometrics*, 45(1), 255–268.
+### Spectral preprocessing
+- Barnes, R.J., Dhanoa, M.S., & Lister, S.J. (1989). Standard normal variate transformation and de-trending of near-infrared diffuse reflectance spectra. *Applied Spectroscopy*, 43(5), 772–777. https://doi.org/10.1366/0003702894202201
+- Rinnan, Å., van den Berg, F., & Engelsen, S.B. (2009). Review of the most common pre-processing techniques for near-infrared spectra. *TrAC Trends in Analytical Chemistry*, 28(10), 1201–1222. https://doi.org/10.1016/j.trac.2009.07.007
+- Savitzky, A. & Golay, M.J.E. (1964). Smoothing and differentiation of data by simplified least squares procedures. *Analytical Chemistry*, 36(8), 1627–1639. https://doi.org/10.1021/ac60214a047
+
+### Random Forest and hyperparameter tuning
+- Breiman, L. (2001). Random forests. *Machine Learning*, 45(1), 5–32. https://doi.org/10.1023/A:1010933404324
+- Liaw, A. & Wiener, M. (2002). Classification and regression by randomForest. *R News*, 2(3), 18–22. https://cran.r-project.org/doc/Rnews/
+- Probst, P., Wright, M.N., & Boulesteix, A.-L. (2019). Hyperparameters and tuning strategies for random forest. *WIREs Data Mining and Knowledge Discovery*, 9(3), e1301. https://doi.org/10.1002/widm.1301
+
+### Soil spectroscopy
+- Bellon-Maurel, V., Fernandez-Ahumada, E., Palagos, B., Roger, J.-M., & McBratney, A. (2010). Critical review of chemometric indicators commonly used for assessing the quality of the prediction of soil attributes by NIR spectroscopy. *TrAC Trends in Analytical Chemistry*, 29(9), 1073–1081. https://doi.org/10.1016/j.trac.2010.05.006
+- Chang, C.-W., Laird, D.A., Mausbach, M.J., & Hurburgh, C.R. (2001). Near-infrared reflectance spectroscopy–principal components regression analyses of soil properties. *Soil Science Society of America Journal*, 65(2), 480–490. https://doi.org/10.2136/sssaj2001.652480x
+- Viscarra Rossel, R.A. & Behrens, T. (2010). Using data mining to model and interpret soil diffuse reflectance spectra. *Geoderma*, 158(1–2), 46–54. https://doi.org/10.1016/j.geoderma.2009.12.025
+
+### Performance metrics and cross-validation
+- Gauch, H.G., Hwang, J.T.G., & Fick, G.W. (2003). Model evaluation by comparison of model-based predictions and measured values. *Agronomy Journal*, 95(6), 1442–1446. https://doi.org/10.2134/agronj2003.1442
+- Lin, L.I.-K. (1989). A concordance correlation coefficient to evaluate reproducibility. *Biometrics*, 45(1), 255–268. https://doi.org/10.2307/2532051
+- Roberts, D.R., Bahn, V., Ciuti, S., Boyce, M.S., Elith, J., Guillera-Arroita, G., … Dormann, C.F. (2017). Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure. *Ecography*, 40(8), 913–929. https://doi.org/10.1111/ecog.02881
+
+### OSSL data
+- Safanelli, J.L., Hengl, T., Parente, L., et al. (2023). Open Soil Spectral Library (OSSL): Building reproducible soil calibration models through open development and community engagement. *PLOS ONE*. https://doi.org/10.1371/journal.pone.0296545
+
+### Pipeline inspiration
 - Clingensmith, C.M. & Grunwald, S. — NRCS Soil Spectral Modeling Project (internal reference).
 
 ---
