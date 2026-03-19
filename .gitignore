@@ -1,0 +1,22 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Output (large files — tracked separately if needed)
+output/models/*.qs
+output/models/*.rds
+
+# Data (raw OSSL files are large; regenerated via download)
+data/*.qs
+data/*.csv
+data/*.parquet
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.log
