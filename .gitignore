@@ -21,3 +21,9 @@ Thumbs.db
 # Temporary
 *.tmp
 *.log
+
+# Reports — large generated files (not tracked in git)
+reports/**/*.html
+reports/**/*.rds
+reports/**/*_cache/
+reports/**/*_files/
