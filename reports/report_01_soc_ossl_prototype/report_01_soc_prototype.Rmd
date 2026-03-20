@@ -2,6 +2,10 @@
 title: "Soil Organic Carbon Prediction from VisNIR Spectroscopy"
 subtitle: "Random Forest Prototype · Report 01 · BMP Project"
 date: "March 2026"
+header-includes:
+  - \usepackage{float}
+  - \floatplacement{figure}{H}
+  - \setmonofont{Menlo}
 output:
   html_document:
     theme: flatly
@@ -16,6 +20,14 @@ output:
     fig_width: 9.5
     fig_height: 5.2
     self_contained: true
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    highlight: tango
+    fig_width: 6.5
+    fig_height: 4.0
 ---
 
 ```{css echo=FALSE}
@@ -116,6 +128,7 @@ suppressPackageStartupMessages({
   library(ggpubr)
   library(viridis)
   library(scales)
+  library(kableExtra)
 })
 
 # ── Source metrics utilities (for fmt_ms helper) ────────────────────────
@@ -269,7 +282,8 @@ data.frame(
     format(n_uuid_final, big.mark = ",")
   )
 ) |>
-  knitr::kable(col.names = c("Data stage", "Count"), align = c("l","r"))
+  knitr::kable(col.names = c("Data stage", "Count"), align = c("l","r"), booktabs = TRUE) |>
+  kableExtra::kable_styling(latex_options = "hold_position")
 ```
 
 <div class="callout-orange">
@@ -303,14 +317,15 @@ data.frame(
     n_zeros
   )
 ) |>
-  knitr::kable(col.names = c("Statistic", "SOC (%)"), align = c("l","r"))
+  knitr::kable(col.names = c("Statistic", "SOC (%)"), align = c("l","r"), booktabs = TRUE) |>
+  kableExtra::kable_styling(latex_options = "hold_position")
 ```
 
 ## Distribution: raw and log-transformed
 
 SOC distributions are typically right-skewed — a small number of samples with very high organic matter content pull the tail rightward. The log₁p transformation (`log(SOC + 1)`) compresses the upper tail, producing a more symmetric distribution and reducing the influence of extreme values on model training.
 
-```{r soc-histogram, fig.height=4.5, fig.cap="**Figure 1.** Distribution of soil organic carbon (SOC, %) before (left) and after log₁p transformation (right). The dashed red line marks the mean. The log-transformed distribution is substantially more symmetric, reducing skewness and potential leverage of high-SOC samples."}
+```{r soc-histogram, fig.height=3.5, fig.cap="Figure 1. Distribution of soil organic carbon (SOC, %) before (left) and after log1p transformation (right). The dashed red line marks the mean. The log-transformed distribution is substantially more symmetric, reducing skewness and potential leverage of high-SOC samples."}
 skew_raw <- round(moments::skewness(y_orig, na.rm = TRUE), 2)
 skew_log <- round(moments::skewness(log1p(y_orig), na.rm = TRUE), 2)
 
@@ -363,7 +378,7 @@ ggpubr::ggarrange(p1, p2, ncol = 2)
 
 ## Sample spectra: raw reflectance
 
-```{r spectra-raw, fig.height=5, fig.cap="**Figure 2.** Random sample of 80 raw reflectance spectra (400–2450 nm, ASD FieldSpec 4), coloured by SOC content (%). Low-SOC soils (yellow) tend to have higher reflectance than high-SOC soils (dark purple), consistent with the well-established negative relationship between organic matter and soil reflectance across the NIR region."}
+```{r spectra-raw, fig.height=5, fig.cap="Figure 2. Random sample of 80 raw reflectance spectra (400-2450 nm, ASD FieldSpec 4), coloured by SOC content (%). Low-SOC soils (yellow) tend to have higher reflectance than high-SOC soils (dark purple), consistent with the well-established negative relationship between organic matter and soil reflectance across the NIR region."}
 set.seed(42L)
 idx_s <- sample(nrow(X_raw), min(80L, nrow(X_raw)))
 
@@ -390,7 +405,7 @@ ggplot(long_raw, aes(x = wl, y = ref, group = id, colour = soc)) +
   scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
   labs(
     title    = "Raw VisNIR Reflectance Spectra (sample of 80)",
-    subtitle = sprintf("ASD FieldSpec 4 · %d–%d nm · %d wavelengths", WAVE_MIN, WAVE_MAX, n_wave),
+    subtitle = sprintf("ASD FieldSpec 4 - %d-%d nm - %d wavelengths", WAVE_MIN, WAVE_MAX, n_wave),
     x        = "Wavelength (nm)",
     y        = "Reflectance"
   ) +
@@ -408,7 +423,7 @@ ggplot(long_raw, aes(x = wl, y = ref, group = id, colour = soc)) +
 
 All three treatments share a **common SG-smoothed base** (Rinnan et al. 2009): the SG smooth (window = `r SG_WINDOW`, poly = `r SG_POLY`) is applied once to raw reflectance, and the 1st-derivative and SNV treatments are derived from that smoothed output. This ensures performance differences are attributable to the transformation step, not to differences in noise reduction.
 
-```{r spectra-treatments, fig.height=7, fig.cap="**Figure 3.** The same random sample of spectra shown under the three preprocessing treatments. **SG Smooth** (top): smoothed reflectance retaining the raw spectral shape. **SG 1st Derivative** (middle): highlights spectral slope changes; additive baseline offsets are removed. **SNV** (bottom): each spectrum is mean-centred and scaled to unit variance; multiplicative scatter is corrected. All treatments computed on the same 80-spectrum sample."}
+```{r spectra-treatments, fig.height=7, fig.cap="Figure 3. The same random sample of spectra shown under the three preprocessing treatments. SG Smooth (top): smoothed reflectance retaining the raw spectral shape. SG 1st Derivative (middle): highlights spectral slope changes; additive baseline offsets are removed. SNV (bottom): each spectrum is mean-centred and scaled to unit variance; multiplicative scatter is corrected. All treatments computed on the same 80-spectrum sample."}
 plots_prep <- lapply(names(prep_labels), function(nm) {
   mat  <- spec_list[[nm]][idx_s, ]
   long <- data.frame(
@@ -460,40 +475,49 @@ ggpubr::ggarrange(
 
 ## Design overview
 
-```
-OSSL VisNIR (350–2500 nm, ASD FieldSpec 4)
-         │
-         ▼
-  Edge trimming (400–2450 nm) + completeness filter
-         │
-         ▼
-  Join with SOC lab data → stratified random sample (n = 1,000)
-         │
-         ▼
-  Raw reflectance
-         │
-         ▼
-  SG Smooth [shared base] ──────────────────► Treatment 1: sg_smooth
-         │
-         ├──► SG 1st Derivative ────────────► Treatment 2: sg_deriv1
-         │
-         └──► SNV ──────────────────────────► Treatment 3: snv
-                                                          │
-                                  ┌───────────────────────┤
-                                  │  For each log mode:   │
-                                  │  log1p(y) / y_orig    │
-                                  └───────────────────────┘
-                                                          │
-                                  Full 3D grid search (OOB RMSE, parallel)
-                                  ntree [500–2000, Δ100] × mtry [p/9, p/6, p/3, p]
-                                  × min.node.size [3, 5, 10] = 192 combinations
-                                                          │
-                                  10-fold × 3-repeat stratified grouped CV
-                                  Folds assigned by layer UUID (leakage prevention)
-                                                          │
-                                  Final model on full dataset
-                                                          │
-                            Metrics · Figures · Saved models (.rds)
+```{r pipeline-diagram, echo=FALSE, results='asis'}
+diagram <- c(
+  "OSSL VisNIR (350-2500 nm, ASD FieldSpec 4)",
+  "         |",
+  "         v",
+  "  Edge trimming (400-2450 nm) + completeness filter",
+  "         |",
+  "         v",
+  "  Join with SOC lab data -> stratified random sample (n = 1,000)",
+  "         |",
+  "         v",
+  "  Raw reflectance",
+  "         |",
+  "         v",
+  "  SG Smooth [shared base] -----------> Treatment 1: sg_smooth",
+  "         |",
+  "         +---> SG 1st Derivative -----> Treatment 2: sg_deriv1",
+  "         |",
+  "         \\---> SNV -----------------> Treatment 3: snv",
+  "                                                  |",
+  "                          +-----------------------+",
+  "                          |  For each log mode:   |",
+  "                          |  log1p(y) / y_orig    |",
+  "                          +-----------------------+",
+  "                                                  |",
+  "                          Full 3D grid search (OOB RMSE, parallel)",
+  "                          ntree [500-2000, step 100] x mtry [p/9,p/6,p/3,p]",
+  "                          x min.node.size [3,5,10] = 192 combinations",
+  "                                                  |",
+  "                          10-fold x 3-repeat stratified grouped CV",
+  "                          Folds assigned by layer UUID (leakage prevention)",
+  "                                                  |",
+  "                          Final model on full dataset",
+  "                                                  |",
+  "                    Metrics . Figures . Saved models (.rds)"
+)
+if (knitr::is_html_output()) {
+  cat("<pre><code>", paste(diagram, collapse = "\n"), "</code></pre>")
+} else {
+  cat("\\begin{small}\\begin{verbatim}\n")
+  cat(paste(diagram, collapse = "\n"))
+  cat("\n\\end{verbatim}\\end{small}\n")
+}
 ```
 
 ## Hyperparameter search space
@@ -532,7 +556,7 @@ In log mode, the RF was trained on log₁p(SOC). Predictions were back-transform
 m_log_disp <- m_log %>%
   dplyr::mutate(
     Preprocessing = prep_labels[preprocessing],
-    `R²`          = fmt_ms(r2,   r2_sd),
+    `R2`          = fmt_ms(r2,   r2_sd),
     `RMSE (%)`    = fmt_ms(rmse, rmse_sd),
     `MAE (%)`     = fmt_ms(mae,  mae_sd),
     `ME (%)`      = fmt_ms(me,   me_sd),
@@ -540,13 +564,15 @@ m_log_disp <- m_log %>%
     `RPIQ`        = fmt_ms(rpiq, rpiq_sd),
     `CCC`         = fmt_ms(ccc,  ccc_sd)
   ) %>%
-  dplyr::select(Preprocessing, `R²`, `RMSE (%)`, `MAE (%)`, `ME (%)`, RPD, RPIQ, CCC)
+  dplyr::select(Preprocessing, `R2`, `RMSE (%)`, `MAE (%)`, `ME (%)`, RPD, RPIQ, CCC)
 
 knitr::kable(
   m_log_disp,
-  caption = "**Table 1.** CV performance metrics under log₁p transformation (mean ± SD across 30 resamples). All metrics computed on the back-transformed SOC (%) scale.",
-  align   = c("l", rep("r", 7))
-)
+  caption = "Table 1. CV performance metrics under log1p transformation (mean +/- SD across 30 resamples). All metrics computed on the back-transformed SOC (\\%) scale.",
+  align   = c("l", rep("r", 7)),
+  booktabs = TRUE
+) |>
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 ```
 
 ## Original scale (no-log mode)
@@ -557,7 +583,7 @@ In no-log mode, the RF was trained and evaluated directly on SOC (%) without tra
 m_raw_disp <- m_raw %>%
   dplyr::mutate(
     Preprocessing = prep_labels[preprocessing],
-    `R²`          = fmt_ms(r2,   r2_sd),
+    `R2`          = fmt_ms(r2,   r2_sd),
     `RMSE (%)`    = fmt_ms(rmse, rmse_sd),
     `MAE (%)`     = fmt_ms(mae,  mae_sd),
     `ME (%)`      = fmt_ms(me,   me_sd),
@@ -565,55 +591,69 @@ m_raw_disp <- m_raw %>%
     `RPIQ`        = fmt_ms(rpiq, rpiq_sd),
     `CCC`         = fmt_ms(ccc,  ccc_sd)
   ) %>%
-  dplyr::select(Preprocessing, `R²`, `RMSE (%)`, `MAE (%)`, `ME (%)`, RPD, RPIQ, CCC)
+  dplyr::select(Preprocessing, `R2`, `RMSE (%)`, `MAE (%)`, `ME (%)`, RPD, RPIQ, CCC)
 
 knitr::kable(
   m_raw_disp,
-  caption = "**Table 2.** CV performance metrics on the original SOC (%) scale (mean ± SD across 30 resamples).",
-  align   = c("l", rep("r", 7))
-)
+  caption = "Table 2. CV performance metrics on the original SOC (\\%) scale (mean +/- SD across 30 resamples).",
+  align   = c("l", rep("r", 7)),
+  booktabs = TRUE
+) |>
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 ```
 
 ## Best model per log mode — key metrics
 
-```{r best-metrics-boxes, fig.height=1.8, out.width="100%", results='asis'}
+```{r best-metrics-boxes, results='asis'}
 # Best per mode
 best_log <- m_log %>% dplyr::filter(preprocessing == "sg_deriv1")
 best_raw <- m_raw %>% dplyr::filter(preprocessing == "sg_deriv1")
 
-cat('<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:12px 0 24px 0;">')
-
-# LOG box
-cat('<div style="border:1px solid #dee2e6; border-radius:6px; padding:16px; background:#f8f9fa;">')
-cat('<p style="font-weight:700; font-size:1em; color:#2980b9; margin:0 0 10px 0;">&#x1F4CA; Best model &mdash; Log mode (SG 1st Derivative)</p>')
-cat('<div class="metric-grid">')
-for(nm in c("r2","rmse","mae","rpd","ccc")) {
-  vals <- list(r2=best_log$r2, rmse=best_log$rmse, mae=best_log$mae, rpd=best_log$rpd, ccc=best_log$ccc)
-  sds  <- list(r2=best_log$r2_sd, rmse=best_log$rmse_sd, mae=best_log$mae_sd, rpd=best_log$rpd_sd, ccc=best_log$ccc_sd)
-  labels_nm <- c(r2="R²", rmse="RMSE (%)", mae="MAE (%)", rpd="RPD", ccc="CCC")
-  cat(sprintf('<div class="metric-box"><div class="metric-val">%s</div><div class="metric-name">%s</div><div class="metric-sd">± %s</div></div>',
-              round(vals[[nm]], 2), labels_nm[[nm]], round(sds[[nm]], 2)))
+if (knitr::is_html_output()) {
+  cat('<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:12px 0 24px 0;">')
+  for (box in list(
+    list(data = best_log, cls = "metric-box",      label = "&#x1F4CA; Best model &mdash; Log mode (SG 1st Derivative)",    col = "#2980b9", bg = "#f8f9fa"),
+    list(data = best_raw, cls = "metric-box best", label = "&#x1F3C6; Best model &mdash; No-log mode (SG 1st Derivative)", col = "#27ae60", bg = "#eafaf1")
+  )) {
+    cat(sprintf('<div style="border:1px solid #dee2e6; border-radius:6px; padding:16px; background:%s;">', box$bg))
+    cat(sprintf('<p style="font-weight:700; font-size:1em; color:%s; margin:0 0 10px 0;">%s</p>', box$col, box$label))
+    cat('<div class="metric-grid">')
+    vals <- list(r2=box$data$r2, rmse=box$data$rmse, mae=box$data$mae, rpd=box$data$rpd, ccc=box$data$ccc)
+    sds  <- list(r2=box$data$r2_sd, rmse=box$data$rmse_sd, mae=box$data$mae_sd, rpd=box$data$rpd_sd, ccc=box$data$ccc_sd)
+    labs <- c(r2="R²", rmse="RMSE (%)", mae="MAE (%)", rpd="RPD", ccc="CCC")
+    for (nm in c("r2","rmse","mae","rpd","ccc"))
+      cat(sprintf('<div class="%s"><div class="metric-val">%s</div><div class="metric-name">%s</div><div class="metric-sd">+/- %s</div></div>',
+                  box$cls, round(vals[[nm]], 2), labs[[nm]], round(sds[[nm]], 2)))
+    cat('</div></div>')
+  }
+  cat('</div>')
+} else {
+  # PDF: render as a clean two-row summary table
+  tbl <- data.frame(
+    Mode          = c("Log mode (log1p)", "No-log mode (original)"),
+    `R2`          = c(round(best_log$r2,   2), round(best_raw$r2,   2)),
+    `RMSE (%)`    = c(round(best_log$rmse, 2), round(best_raw$rmse, 2)),
+    `MAE (%)`     = c(round(best_log$mae,  2), round(best_raw$mae,  2)),
+    `RPD`         = c(round(best_log$rpd,  2), round(best_raw$rpd,  2)),
+    `CCC`         = c(round(best_log$ccc,  2), round(best_raw$ccc,  2)),
+    check.names   = FALSE
+  )
+  names(tbl)[2] <- "R2"
+  print(
+    knitr::kable(tbl,
+      caption  = "Best model per log mode (both: SG 1st Derivative). Point estimates only.",
+      align    = c("l", rep("r", 5)),
+      booktabs = TRUE
+    ) |>
+      kableExtra::kable_styling(latex_options = c("hold_position", "scale_down")) |>
+      kableExtra::row_spec(2, bold = TRUE, background = "#eafaf1")
+  )
 }
-cat('</div></div>')
-
-# RAW box
-cat('<div style="border:1px solid #dee2e6; border-radius:6px; padding:16px; background:#eafaf1;">')
-cat('<p style="font-weight:700; font-size:1em; color:#27ae60; margin:0 0 10px 0;">&#x1F3C6; Best model &mdash; No-log mode (SG 1st Derivative)</p>')
-cat('<div class="metric-grid">')
-for(nm in c("r2","rmse","mae","rpd","ccc")) {
-  vals <- list(r2=best_raw$r2, rmse=best_raw$rmse, mae=best_raw$mae, rpd=best_raw$rpd, ccc=best_raw$ccc)
-  sds  <- list(r2=best_raw$r2_sd, rmse=best_raw$rmse_sd, mae=best_raw$mae_sd, rpd=best_raw$rpd_sd, ccc=best_raw$ccc_sd)
-  labels_nm <- c(r2="R²", rmse="RMSE (%)", mae="MAE (%)", rpd="RPD", ccc="CCC")
-  cat(sprintf('<div class="metric-box best"><div class="metric-val">%s</div><div class="metric-name">%s</div><div class="metric-sd">± %s</div></div>',
-              round(vals[[nm]], 2), labels_nm[[nm]], round(sds[[nm]], 2)))
-}
-cat('</div></div>')
-cat('</div>')
 ```
 
 ## Observed vs. predicted — SG 1st Derivative
 
-```{r obs-pred-deriv1, fig.height=4.5, fig.cap="**Figure 4.** Observed vs. predicted SOC (%) for the SG 1st Derivative preprocessing treatment. Left: log mode (back-transformed); right: no-log mode. Each point represents one held-out fold observation across the 30 resamples. The dashed line is the 1:1 reference. The solid blue line is the OLS regression of predicted on observed. Tight agreement with the 1:1 line indicates low bias; the regression slope indicates proportional bias."}
+```{r obs-pred-deriv1, fig.height=4.5, out.width="48%", fig.show='hold', fig.cap="Figure 4. Observed vs. predicted SOC (%) for the SG 1st Derivative preprocessing treatment. Left: log mode (back-transformed); right: no-log mode. Each point represents one held-out fold observation across the 30 resamples. The dashed line is the 1:1 reference. The solid blue line is the OLS regression of predicted on observed. Tight agreement with the 1:1 line indicates low bias; the regression slope indicates proportional bias."}
 knitr::include_graphics(c(
   "figures/obs_pred_oc_usda.c729_w.pct_log_sg_deriv1.png",
   "figures/obs_pred_oc_usda.c729_w.pct_raw_sg_deriv1.png"
@@ -622,7 +662,7 @@ knitr::include_graphics(c(
 
 ## Observed vs. predicted — all treatments (no-log)
 
-```{r obs-pred-all-raw, fig.height=4.5, fig.cap="**Figure 5.** Observed vs. predicted SOC (%) for all three preprocessing treatments under the no-log (original scale) strategy. The SG 1st derivative (centre) shows the tightest agreement with the 1:1 line and the highest R²."}
+```{r obs-pred-all-raw, fig.height=4.5, out.width="31%", fig.show='hold', fig.cap="Figure 5. Observed vs. predicted SOC (%) for all three preprocessing treatments under the no-log (original scale) strategy. The SG 1st derivative (centre) shows the tightest agreement with the 1:1 line and the highest R2."}
 knitr::include_graphics(c(
   "figures/obs_pred_oc_usda.c729_w.pct_raw_sg_smooth.png",
   "figures/obs_pred_oc_usda.c729_w.pct_raw_sg_deriv1.png",
@@ -632,7 +672,7 @@ knitr::include_graphics(c(
 
 ## Preprocessing comparison — RPD and R²
 
-```{r comparison-plots, fig.height=4.0, fig.cap="**Figure 6.** Cross-preprocessing CV comparison for the no-log mode. Left: RPD (Residual Prediction Deviation; higher is better, RPD > 2 = good quantitative). Right: R² (coefficient of determination; mean ± SD across 30 resamples). SG 1st derivative consistently outperforms SG smooth and SNV."}
+```{r comparison-plots, fig.height=4.0, out.width="48%", fig.show='hold', fig.cap="Figure 6. Cross-preprocessing CV comparison for the no-log mode. Left: RPD (Residual Prediction Deviation; higher is better, RPD > 2 = good quantitative). Right: R2 (coefficient of determination; mean +/- SD across 30 resamples). SG 1st derivative consistently outperforms SG smooth and SNV."}
 knitr::include_graphics(c(
   "figures/comparison_rpd_oc_usda.c729_w.pct_raw.png",
   "figures/comparison_r2_oc_usda.c729_w.pct_raw.png"
@@ -647,7 +687,7 @@ knitr::include_graphics(c(
 comp_disp <- data.frame(
   `Log mode`     = c("log1p(SOC)", "Original SOC (%)"),
   Preprocessing  = prep_labels[m_comp$preprocessing],
-  `R²`           = round(m_comp$r2, 2),
+  `R2`           = round(m_comp$r2, 2),
   `RMSE (%)`     = round(m_comp$rmse, 2),
   `MAE (%)`      = round(m_comp$mae, 2),
   `RPD`          = round(m_comp$rpd, 2),
@@ -657,12 +697,14 @@ comp_disp <- data.frame(
 )
 knitr::kable(
   comp_disp,
-  caption = "**Table 3.** Best model per log mode (both selected sg_deriv1). Metrics computed on original SOC (%) scale after back-transformation where applicable.",
-  align   = c("l","l","r","r","r","r","r","r")
-)
+  caption = "Table 3. Best model per log mode (both selected SG 1st Derivative). Metrics computed on original SOC (\\%) scale after back-transformation where applicable.",
+  align    = c("l","l","r","r","r","r","r","r"),
+  booktabs = TRUE
+) |>
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 ```
 
-```{r log-comparison-bar, fig.height=4.0, fig.cap="**Figure 7.** Side-by-side comparison of R², RMSE, RPD, and CCC for the best model under each log-mode strategy (both: SG 1st derivative). Differences are small, with the no-log mode showing a marginal advantage in RMSE and RPD."}
+```{r log-comparison-bar, fig.height=4.0, fig.cap="Figure 7. Side-by-side comparison of R2, RMSE, RPD, and CCC for the best model under each log-mode strategy (both: SG 1st derivative). Differences are small, with the no-log mode showing a marginal advantage in RMSE and RPD."}
 modes_df <- data.frame(
   mode  = c("log1p(SOC)", "Original SOC"),
   r2    = c(m_comp$r2[m_comp$log_mode == "log"],    m_comp$r2[m_comp$log_mode == "no_log"]),
@@ -683,7 +725,7 @@ ggplot(modes_long, aes(x = mode, y = value, fill = mode)) +
   scale_fill_manual(values = c("log1p(SOC)" = "#2980b9", "Original SOC" = "#27ae60")) +
   facet_wrap(~metric, scales = "free_y", nrow = 1) +
   labs(x = NULL, y = NULL,
-       title = "Log mode comparison — best model (SG 1st Derivative)") +
+       title = "Log mode comparison - best model (SG 1st Derivative)") +
   theme_bw(base_size = 11) +
   theme(
     strip.background  = element_rect(fill = "#2c3e50"),
@@ -703,7 +745,7 @@ ggplot(modes_long, aes(x = mode, y = value, fill = mode)) +
 
 Variable importance (mean impurity decrease, averaged across 30 CV resamples) identifies the spectral wavelengths most informative for SOC prediction under each preprocessing strategy.
 
-```{r importance-plot, fig.height=4.5, fig.cap="**Figure 8.** Spectral variable importance profiles for SG 1st derivative (no-log mode, top) and SNV (no-log mode, bottom). Importance is averaged over 30 CV resamples and normalised to [0, 1]. Key absorption features associated with SOC in the 1400–1800 nm (C-H, O-H overtones) and 2000–2300 nm (C=O, CH₂ combination bands) regions are commonly highlighted."}
+```{r importance-plot, fig.height=4.0, out.width="80%", fig.show='hold', fig.cap="Figure 8. Spectral variable importance profiles for SG 1st derivative (no-log mode, top) and SNV (no-log mode, bottom). Importance is averaged over 30 CV resamples and normalised to [0, 1]. Key absorption features associated with SOC in the 1400-1800 nm (C-H, O-H overtones) and 2000-2300 nm (C=O, CH2 combination bands) regions are commonly highlighted."}
 knitr::include_graphics(c(
   "figures/importance_oc_usda.c729_w.pct_raw_sg_deriv1.png",
   "figures/importance_oc_usda.c729_w.pct_raw_snv.png"
@@ -736,9 +778,11 @@ msd_df <- dplyr::bind_rows(
 
 knitr::kable(
   msd_df,
-  caption = "**Table 4.** MSD decomposition for all treatment × log-mode combinations. SB = squared bias; NU = non-unity slope (scale error); LC = lack of correlation (random error). Values in % of total MSE.",
-  align   = c("l","l","r","r","r","r")
-)
+  caption  = "Table 4. MSD decomposition for all treatment x log-mode combinations. SB = squared bias; NU = non-unity slope (scale error); LC = lack of correlation (random error). Values in \\% of total MSE.",
+  align    = c("l","l","r","r","r","r"),
+  booktabs = TRUE
+) |>
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 ```
 
 <div class="callout-orange">
@@ -757,9 +801,9 @@ data.frame(
     "Preprocessing", "Log transformation",
     "num.trees", "mtry", "min.node.size",
     "CV strategy", "Total resamples",
-    "R² (mean ± SD)", "RMSE (mean ± SD)", "MAE (mean ± SD)",
-    "RPD (mean ± SD)", "RPIQ (mean ± SD)", "CCC (mean ± SD)",
-    "ME (mean ± SD) — bias"
+    "R2 (mean +/- SD)", "RMSE (mean +/- SD)", "MAE (mean +/- SD)",
+    "RPD (mean +/- SD)", "RPIQ (mean +/- SD)", "CCC (mean +/- SD)",
+    "ME (mean +/- SD) -- bias"
   ),
   Value = c(
     "ASD FieldSpec 4",
@@ -784,10 +828,12 @@ data.frame(
   )
 ) |>
   knitr::kable(
-    caption = "**Table 5.** Summary of the best-performing model configuration (SG 1st Derivative, no-log scale).",
+    caption  = "Table 5. Summary of the best-performing model configuration (SG 1st Derivative, no-log scale).",
     col.names = c("Setting", "Value"),
-    align = c("l", "l")
-  )
+    align    = c("l", "l"),
+    booktabs = TRUE
+  ) |>
+  kableExtra::kable_styling(latex_options = "hold_position")
 ```
 
 ---

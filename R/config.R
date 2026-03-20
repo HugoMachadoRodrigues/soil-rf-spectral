@@ -54,8 +54,8 @@ SG_POLY   <- 3    # polynomial order (< SG_WINDOW)
 # Set to 1.0 when running with your own complete dataset.
 OSSL_FRACTION  <- 0.20
 # Hard cap on sample size after fraction sampling (set to Inf to disable).
-# Prototype default: 2000 samples are sufficient to evaluate the pipeline.
-N_MAX_SAMPLES  <- 2000
+# Prototype default: 1000 samples are sufficient to evaluate the pipeline.
+N_MAX_SAMPLES  <- 1000
 # ASD FieldSpec 4 usable range (nm) — edges trimmed to reduce noise
 WAVE_MIN      <- 400
 WAVE_MAX      <- 2450

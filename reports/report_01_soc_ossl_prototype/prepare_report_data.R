@@ -11,22 +11,34 @@
 
 message("── Preparing report data ───────────────────────────────────────────")
 
+# ── 0. Resolve project root (works regardless of caller's working directory) ──
+.script_dir  <- normalizePath(dirname(sys.frame(1)$ofile), mustWork = FALSE)
+# Fallback when sourced interactively without a frame (e.g. source() with no env)
+if (!nzchar(.script_dir) || .script_dir == ".") {
+  .script_dir <- normalizePath(
+    dirname(rstudioapi::getSourceEditorContext()$path), mustWork = FALSE
+  )
+}
+proj_root    <- normalizePath(file.path(.script_dir, "../.."), mustWork = TRUE)
+message("  Project root: ", proj_root)
+
 # ── 1. Source project config and utilities ────────────────────────────────────
-source("R/config.R")
-source("R/utils_preprocessing.R")
+source(file.path(proj_root, "R/config.R"))
+source(file.path(proj_root, "R/utils_preprocessing.R"))
 
 # ── 2. Load OSSL from local cache ─────────────────────────────────────────────
 library(dplyr)
 library(tidyr)
 library(readr)
 
-message("  Loading spectral data (", DATA_DIR, ") …")
+abs_data_dir <- file.path(proj_root, DATA_DIR)
+message("  Loading spectral data (", abs_data_dir, ") …")
 visnir_raw <- readr::read_csv(
-  file.path(DATA_DIR, "ossl_visnir_L0_v1.2.csv.gz"),
+  file.path(abs_data_dir, "ossl_visnir_L0_v1.2.csv.gz"),
   show_col_types = FALSE
 )
 soillab <- readr::read_csv(
-  file.path(DATA_DIR, "ossl_soillab_L1_v1.2.csv.gz"),
+  file.path(abs_data_dir, "ossl_soillab_L1_v1.2.csv.gz"),
   show_col_types = FALSE
 )
 
@@ -80,7 +92,7 @@ spec_list <- build_preprocessing_stack(
 )
 
 # ── 8. Save compact report data ───────────────────────────────────────────────
-out_path <- "reports/report_01_soc_ossl_prototype/report_data.rds"
+out_path <- file.path(.script_dir, "report_data.rds")
 saveRDS(
   list(
     X_raw         = X_raw,
