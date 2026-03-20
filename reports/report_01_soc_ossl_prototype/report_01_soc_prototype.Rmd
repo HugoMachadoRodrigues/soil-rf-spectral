@@ -85,7 +85,7 @@ tr.best-row { background: #eafaf1 !important; font-weight: 600; }
 .metric-sd   { font-size: 0.75em; color: #95a5a6; }
 
 /* ── Figure captions ──────────────────────────────────────────────────── */
-p.caption { color: #7f8c8d; font-size: 0.88em; text-align: center; margin-top: -8px; }
+p.caption { color: #2c3e50; font-size: 0.88em; text-align: center; margin-top: -8px; }
 
 /* ── Code ─────────────────────────────────────────────────────────────── */
 pre { background: #f4f6f7; border-radius: 4px; font-size: 0.85em; }
@@ -189,7 +189,7 @@ best_row <- m_raw %>% dplyr::filter(preprocessing == "sg_deriv1")
 
 <div class="author-block">
 <div class="author-info">
-<h4>Hugo Machado Rodrigues</h4>
+<h4>Hugo Rodrigues</h4>
 <p>University of Florida &mdash; BMP Project &nbsp;|&nbsp; Soil Spectroscopy &amp; Machine Learning</p>
 <div class="author-links">
 <a class="orcid-btn"  href="https://orcid.org/0000-0002-8070-8126"                        target="_blank">ORCID</a>
@@ -397,6 +397,8 @@ ggplot(long_raw, aes(x = wl, y = ref, group = id, colour = soc)) +
   theme_bw(base_size = 12) +
   theme(
     legend.position   = "right",
+    legend.title      = element_text(colour = "black"),
+    legend.text       = element_text(colour = "black"),
     plot.title        = element_text(face = "bold"),
     panel.grid.minor  = element_blank()
   )
@@ -438,7 +440,9 @@ plots_prep <- lapply(names(prep_labels), function(nm) {
     theme(
       plot.title       = element_text(face = "bold", colour = prep_cols[[nm]]),
       panel.grid.minor = element_blank(),
-      legend.position  = "right"
+      legend.position  = "right",
+      legend.title     = element_text(colour = "black"),
+      legend.text      = element_text(colour = "black")
     )
 })
 
@@ -836,7 +840,7 @@ data.frame(
 
 <div style="margin-top:40px; padding:16px; background:#f8f9fa; border-radius:6px; font-size:0.85em; color:#7f8c8d; text-align:center;">
 Report generated with R · ranger · OSSL — BMP Project, University of Florida<br>
-© 2026 Hugo Machado Rodrigues ·
+© 2026 Hugo Rodrigues ·
 <a href="https://orcid.org/0000-0002-8070-8126">ORCID</a> ·
 <a href="https://github.com/HugoMachadoRodrigues">GitHub</a> ·
 <a href="https://www.researchgate.net/profile/Hugo-Rodrigues-12">ResearchGate</a><br>

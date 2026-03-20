@@ -11,7 +11,7 @@
 
 ## Author
 
-**Hugo Machado Rodrigues** — University of Florida, BMP Project
+**Hugo Rodrigues** — University of Florida, BMP Project
 
 [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--8070--8126-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0000-0002-8070-8126)
 [![GitHub](https://img.shields.io/badge/GitHub-HugoMachadoRodrigues-181717?logo=github&logoColor=white)](https://github.com/HugoMachadoRodrigues)
@@ -372,7 +372,7 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 
 ```bibtex
 @software{soil_rf_spectral_2026,
-  author  = {Rodrigues, Hugo Machado},
+  author  = {Rodrigues, Hugo},
   title   = {Soil Spectral Modeling with Random Forest — BMP Project},
   year    = {2026},
   orcid   = {0000-0002-8070-8126},
@@ -383,4 +383,4 @@ OSSL data are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by
 ---
 
 *Built with R · ranger · OSSL — BMP Project, University of Florida*
-*© Hugo Machado Rodrigues · [ORCID](https://orcid.org/0000-0002-8070-8126) · [GitHub](https://github.com/HugoMachadoRodrigues)*
+*© Hugo Rodrigues · [ORCID](https://orcid.org/0000-0002-8070-8126) · [GitHub](https://github.com/HugoMachadoRodrigues)*

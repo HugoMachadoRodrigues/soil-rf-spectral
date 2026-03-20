@@ -10,7 +10,7 @@
 #   5. Final model fit on full data
 #   6. Results export (metrics CSV, model .rds, figures)
 #
-# Author  : Hugo Machado Rodrigues
+# Author  : Hugo Rodrigues
 #           University of Florida — BMP Project
 #           ORCID    : https://orcid.org/0000-0002-8070-8126
 #           GitHub   : https://github.com/HugoMachadoRodrigues
